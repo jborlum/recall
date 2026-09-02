@@ -88,24 +88,20 @@ to delete its bookmark after confirmation, or `Esc` to close the picker.
 active, it opens the bookmark-name prompt immediately; if several are active,
 it first asks which one to bookmark.
 
-For Omarchy/Hyprland, add these bindings to `~/.config/hypr/bindings.lua`:
+For Omarchy/Hyprland, install the global hotkeys with:
 
-```lua
-o.bind(
-  "SUPER + ALT + B",
-  "Bookmark AI conversation",
-  "setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title=Recall -e env RECALL_NOTIFY=1 recall pin-active"
-)
-
-o.bind(
-  "SUPER + ALT + R",
-  "Recall bookmarked conversation",
-  "setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title=Recall -e env RECALL_NOTIFY=1 recall bookmarks"
-)
+```sh
+recall setup omarchy
 ```
 
-Ensure `recall` is on the compositor's `PATH`; otherwise replace `recall` in
-the bindings with the binary's absolute path. Reload Hyprland after saving.
+The setup command checks for conflicts, backs up `~/.config/hypr/bindings.lua`,
+adds only missing bindings, and reloads and validates Hyprland. It is safe to
+run more than once. Inspect or remove the integration with:
+
+```sh
+recall setup status
+recall setup remove
+```
 
 ## Storage and privacy
 

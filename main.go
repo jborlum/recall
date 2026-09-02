@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var version = "0.1.0"
+var version = "0.2.0"
 
 type session struct {
 	Provider string
@@ -93,6 +93,9 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	if command == "help" {
 		usage(out)
 		return 0
+	}
+	if command == "setup" {
+		return runSetup(rest, out, errOut)
 	}
 
 	bookmarks, err := loadBookmarks()
@@ -208,6 +211,9 @@ Usage:
   recall unpin NAME                remove a bookmark only
   recall [flags] pins              list bookmarks
   recall [flags] doctor            report discovery and stale bookmarks
+  recall setup omarchy             install Omarchy global hotkeys
+  recall setup status              show Omarchy hotkey status
+  recall setup remove              remove Omarchy global hotkeys
 
 Flags:
   --provider codex|claude
@@ -219,7 +225,7 @@ Flags:
 
 func isCommand(value string) bool {
 	switch value {
-	case "open", "list", "fork", "pin", "pin-active", "bookmarks", "unpin", "pins", "doctor", "help":
+	case "open", "list", "fork", "pin", "pin-active", "bookmarks", "unpin", "pins", "doctor", "setup", "help":
 		return true
 	default:
 		return false

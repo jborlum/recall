@@ -91,7 +91,7 @@ it first asks which one to bookmark.
 For Omarchy/Hyprland, install the global hotkeys with:
 
 ```sh
-recall setup omarchy
+recall setup-omarchy
 ```
 
 The setup command checks for conflicts, backs up `~/.config/hypr/bindings.lua`,
@@ -99,8 +99,8 @@ adds only missing bindings, and reloads and validates Hyprland. It is safe to
 run more than once. Inspect or remove the integration with:
 
 ```sh
-recall setup status
-recall setup remove
+recall setup-omarchy status
+recall setup-omarchy remove
 ```
 
 ## Storage and privacy

@@ -25,9 +25,9 @@ type bindingState struct {
 	conflict string
 }
 
-func runSetup(args []string, out, errOut io.Writer) int {
-	if len(args) != 1 {
-		fmt.Fprintln(errOut, "usage: recall setup omarchy|status|remove")
+func runSetupOmarchy(args []string, out, errOut io.Writer) int {
+	if len(args) > 1 {
+		fmt.Fprintln(errOut, "usage: recall setup-omarchy [status|remove]")
 		return 2
 	}
 	path, err := omarchyBindingsPath()
@@ -35,15 +35,19 @@ func runSetup(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "recall: locate Omarchy bindings: %v\n", err)
 		return 1
 	}
-	switch args[0] {
-	case "omarchy":
+	action := "install"
+	if len(args) == 1 {
+		action = args[0]
+	}
+	switch action {
+	case "install":
 		return installOmarchySetup(path, out, errOut)
 	case "status":
 		return omarchySetupStatus(path, out, errOut)
 	case "remove":
 		return removeOmarchySetup(path, out, errOut)
 	default:
-		fmt.Fprintln(errOut, "usage: recall setup omarchy|status|remove")
+		fmt.Fprintln(errOut, "usage: recall setup-omarchy [status|remove]")
 		return 2
 	}
 }

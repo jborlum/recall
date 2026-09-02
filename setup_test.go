@@ -15,7 +15,7 @@ func TestOmarchySetupLifecycle(t *testing.T) {
 	t.Setenv("RECALL_SETUP_NO_RELOAD", "1")
 
 	var output bytes.Buffer
-	if code := runSetup([]string{"omarchy"}, &output, &bytes.Buffer{}); code != 0 {
+	if code := runSetupOmarchy(nil, &output, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup exit = %d", code)
 	}
 	configured, err := os.ReadFile(path)
@@ -27,13 +27,13 @@ func TestOmarchySetupLifecycle(t *testing.T) {
 	}
 
 	output.Reset()
-	if code := runSetup([]string{"omarchy"}, &output, &bytes.Buffer{}); code != 0 || !strings.Contains(output.String(), "already configured") {
+	if code := runSetupOmarchy(nil, &output, &bytes.Buffer{}); code != 0 || !strings.Contains(output.String(), "already configured") {
 		t.Fatalf("second setup: exit=%d output=%q", code, output.String())
 	}
-	if code := runSetup([]string{"status"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runSetupOmarchy([]string{"status"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("status exit = %d", code)
 	}
-	if code := runSetup([]string{"remove"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runSetupOmarchy([]string{"remove"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("remove exit = %d", code)
 	}
 	removed, err := os.ReadFile(path)
@@ -52,7 +52,7 @@ func TestOmarchySetupDetectsConflict(t *testing.T) {
 	t.Setenv("RECALL_SETUP_NO_RELOAD", "1")
 
 	var errors bytes.Buffer
-	if code := runSetup([]string{"omarchy"}, &bytes.Buffer{}, &errors); code != 1 {
+	if code := runSetupOmarchy(nil, &bytes.Buffer{}, &errors); code != 1 {
 		t.Fatalf("setup exit = %d", code)
 	}
 	if !strings.Contains(errors.String(), "already assigned") {
@@ -87,7 +87,7 @@ func TestSetupMigratesManualRecallBindings(t *testing.T) {
 	t.Setenv("RECALL_HYPR_BINDINGS", path)
 	t.Setenv("RECALL_SETUP_NO_RELOAD", "1")
 
-	if code := runSetup([]string{"omarchy"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := runSetupOmarchy(nil, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup exit = %d", code)
 	}
 	updated, err := os.ReadFile(path)
@@ -96,5 +96,15 @@ func TestSetupMigratesManualRecallBindings(t *testing.T) {
 	}
 	if strings.Count(string(updated), setupBegin) != 1 || strings.Contains(string(updated), "/old/recall") {
 		t.Fatalf("manual bindings were not migrated:\n%s", updated)
+	}
+}
+
+func TestOldSetupCommandFailsSafely(t *testing.T) {
+	var errors bytes.Buffer
+	if code := run([]string{"setup"}, &bytes.Buffer{}, &bytes.Buffer{}, &errors); code != 2 {
+		t.Fatalf("setup exit = %d", code)
+	}
+	if !strings.Contains(errors.String(), "setup-omarchy") {
+		t.Fatalf("error = %q", errors.String())
 	}
 }

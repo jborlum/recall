@@ -25,6 +25,21 @@ or network service.
 
 ## Install
 
+### Arch Linux / Omarchy
+
+Clone the repository and build a native pacman package:
+
+```sh
+git clone git@github.com:jborlum/recall.git
+cd recall
+makepkg -si
+```
+
+This installs `recall` at `/usr/bin/recall`; pacman then owns the binary and can
+upgrade or remove it normally. `fzf` is declared as an optional dependency.
+
+### Other Linux distributions
+
 Build directly with Go:
 
 ```sh

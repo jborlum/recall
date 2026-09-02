@@ -1,0 +1,15 @@
+pkgbase = recall
+	pkgdesc = Find, bookmark, and reopen local Codex and Claude conversations
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/jborlum/recall
+	arch = x86_64
+	arch = aarch64
+	license = LicenseRef-All-Rights-Reserved
+	makedepends = git
+	makedepends = go
+	optdepends = fzf: interactive fuzzy picker
+	source = recall::git+ssh://git@github.com/jborlum/recall.git#tag=v0.1.0
+	sha256sums = SKIP
+
+pkgname = recall

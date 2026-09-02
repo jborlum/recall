@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,8 +112,8 @@ func TestConfirm(t *testing.T) {
 }
 
 func TestListAndOpenAreQueriesNotCommands(t *testing.T) {
-	if isCommand("list") || isCommand("open") {
-		t.Fatal("list and open should be treated as search terms")
+	if isCommand("list") || isCommand("open") || isCommand("fork") {
+		t.Fatal("list, open, and fork should be treated as search terms")
 	}
 }
 
@@ -193,18 +194,30 @@ func TestAskBookmarkNameUsesAvailableSlug(t *testing.T) {
 	}
 }
 
-func TestParseBookmarkSelection(t *testing.T) {
-	index, action, err := parseBookmarkSelection("enter\n2\trow\n")
+func TestParseSelection(t *testing.T) {
+	index, action, err := parseSelection("enter\n2\trow\n")
 	if err != nil || index != 2 || action != actionOpen {
 		t.Fatalf("open selection = %d, %d, %v", index, action, err)
 	}
-	index, action, err = parseBookmarkSelection("ctrl-d\n1\trow\n")
+	index, action, err = parseSelection("ctrl-f\n1\trow\n")
+	if err != nil || index != 1 || action != actionFork {
+		t.Fatalf("fork selection = %d, %d, %v", index, action, err)
+	}
+	index, action, err = parseSelection("ctrl-d\n1\trow\n")
 	if err != nil || index != 1 || action != actionDelete {
 		t.Fatalf("delete selection = %d, %d, %v", index, action, err)
 	}
-	index, action, err = parseBookmarkSelection("0\trow\n")
+	index, action, err = parseSelection("0\trow\n")
 	if err != nil || index != 0 || action != actionOpen {
 		t.Fatalf("plain selection = %d, %d, %v", index, action, err)
+	}
+}
+
+func TestPickerRequiresFZF(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	_, _, err := pick([]session{{ID: "first"}}, options{limit: 50}, true, false, "recall> ", bytes.NewReader(nil), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "fzf is required") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

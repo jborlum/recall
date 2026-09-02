@@ -12,15 +12,14 @@ or network service.
 - Search Codex and Claude Code conversations by title, content, provider, or
   working directory.
 - Bookmark the conversation attached to the active provider process.
-- Open or delete bookmarks from a single `fzf` picker.
+- Resume, fork, or delete bookmarks from a single `fzf` picker.
 - Resume and fork sessions through the provider CLI.
 - Keep all bookmark data in one small local JSON file.
 
 ## Requirements
 
 - The `codex` and/or `claude` CLI.
-- [`fzf`](https://github.com/junegunn/fzf) for the best interactive experience.
-  A built-in numbered picker is used when `fzf` is unavailable.
+- [`fzf`](https://github.com/junegunn/fzf).
 - Go 1.23 or newer to build from source.
 
 ## Install
@@ -36,7 +35,7 @@ makepkg -si
 ```
 
 This installs `recall` at `/usr/bin/recall`; pacman then owns the binary and can
-upgrade or remove it normally. `fzf` is declared as an optional dependency.
+upgrade or remove it normally. Pacman installs the required `fzf` dependency.
 
 ### Other Linux distributions
 
@@ -66,11 +65,11 @@ recall refresh token           # full-text search, then resume
 recall --print cache           # print results without opening anything
 recall --provider codex auth   # restrict results to Codex
 recall --cwd .                 # restrict results to this directory tree
-recall fork experiment         # fork the selected conversation
+recall experiment              # search; press Ctrl+F to fork the selection
 
 recall pin auth-design token   # bookmark a matching session as auth-design
 recall pin-active              # bookmark the currently active session
-recall bookmarks               # interactively launch or delete bookmarks
+recall bookmarks               # resume, fork, or delete bookmarks
 recall pins                    # print bookmarks
 recall unpin auth-design       # remove a bookmark, not its transcript
 recall doctor                  # report discovery and stale bookmarks
@@ -79,8 +78,9 @@ recall doctor                  # report discovery and stale bookmarks
 Global flags must appear before the command or query. Run `recall help` for the
 complete command summary.
 
-In the bookmark manager, press `Enter` to launch the selected session, `Ctrl+D`
-to delete its bookmark after confirmation, or `Esc` to close the picker.
+In the main picker, press `Enter` to resume or `Ctrl+F` to fork the selected
+session. The bookmark manager adds `Ctrl+D` to delete a bookmark after
+confirmation. Press `Esc` to close either picker.
 
 ## Global hotkeys
 

@@ -36,7 +36,7 @@ func pinActive(sessions []session, bookmarks map[string]bookmark, args []string,
 			return 1
 		}
 		var err error
-		selected, err = pick(active, opts, in, out, errOut)
+		selected, _, err = pick(active, opts, false, false, "active> ", in, errOut)
 		if err != nil {
 			if !errors.Is(err, errCancelled) {
 				fmt.Fprintf(errOut, "recall: %v\n", err)

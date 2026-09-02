@@ -2,20 +2,11 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strconv"
 	"strings"
-)
-
-type bookmarkAction int
-
-const (
-	actionOpen bookmarkAction = iota
-	actionDelete
 )
 
 func manageBookmarks(sessions []session, bookmarks map[string]bookmark, opts options, in io.Reader, out, errOut io.Writer) int {
@@ -31,7 +22,7 @@ func manageBookmarks(sessions []session, bookmarks map[string]bookmark, opts opt
 			notify(message)
 			return 0
 		}
-		selected, action, err := pickBookmark(pinned, opts, in, out, errOut)
+		selected, action, err := pick(pinned, opts, true, true, "bookmarks> ", in, errOut)
 		if err != nil {
 			if errors.Is(err, errCancelled) {
 				return 130
@@ -62,7 +53,7 @@ func manageBookmarks(sessions []session, bookmarks map[string]bookmark, opts opt
 			fmt.Fprintf(errOut, "recall: bookmark %q points to a missing session; delete it with Ctrl+D\n", selected.Label)
 			continue
 		}
-		if err := launch(selected, false, in, out, errOut); err != nil {
+		if err := launch(selected, action == actionFork, in, out, errOut); err != nil {
 			if errors.Is(err, errCancelled) {
 				return 130
 			}
@@ -89,68 +80,7 @@ func confirmNo(in io.Reader, out io.Writer, prompt string) (bool, error) {
 	}
 }
 
-func pickBookmark(items []session, opts options, in io.Reader, out, errOut io.Writer) (session, bookmarkAction, error) {
-	limit := opts.limit
-	if len(items) < limit {
-		limit = len(items)
-	}
-	candidates := items[:limit]
-	if !opts.noFZF {
-		if path, err := exec.LookPath("fzf"); err == nil {
-			var input strings.Builder
-			for index, item := range candidates {
-				fmt.Fprintf(&input, "%d\t%s\n", index, displayLine(item))
-			}
-			var selected bytes.Buffer
-			cmd := exec.Command(
-				path,
-				"--delimiter=\\t",
-				"--with-nth=2..",
-				"--expect=enter,ctrl-d",
-				"--header=Enter: open   Ctrl-D: delete   Esc: close",
-				"--prompt=bookmarks> ",
-				"--height=80%",
-				"--reverse",
-			)
-			cmd.Stdin = strings.NewReader(input.String())
-			cmd.Stdout = &selected
-			cmd.Stderr = errOut
-			if err := cmd.Run(); err != nil {
-				return session{}, actionOpen, errCancelled
-			}
-			index, action, err := parseBookmarkSelection(selected.String())
-			if err != nil || index < 0 || index >= len(candidates) {
-				return session{}, actionOpen, errors.New("invalid picker result")
-			}
-			return candidates[index], action, nil
-		}
-	}
-
-	for index, item := range candidates {
-		fmt.Fprintf(out, "%2d  %s\n", index+1, displayLine(item))
-	}
-	fmt.Fprint(out, "Open NUMBER, d NUMBER to delete, or q: ")
-	answer, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return session{}, actionOpen, err
-	}
-	answer = strings.TrimSpace(answer)
-	if answer == "" || strings.EqualFold(answer, "q") {
-		return session{}, actionOpen, errCancelled
-	}
-	action := actionOpen
-	if strings.HasPrefix(strings.ToLower(answer), "d ") {
-		action = actionDelete
-		answer = strings.TrimSpace(answer[2:])
-	}
-	index, err := strconv.Atoi(answer)
-	if err != nil || index < 1 || index > len(candidates) {
-		return session{}, actionOpen, errors.New("invalid selection")
-	}
-	return candidates[index-1], action, nil
-}
-
-func parseBookmarkSelection(value string) (int, bookmarkAction, error) {
+func parseSelection(value string) (int, selectionAction, error) {
 	lines := strings.Split(strings.TrimSpace(value), "\n")
 	if len(lines) == 0 || lines[0] == "" {
 		return 0, actionOpen, errors.New("empty selection")
@@ -158,7 +88,10 @@ func parseBookmarkSelection(value string) (int, bookmarkAction, error) {
 	action := actionOpen
 	row := lines[0]
 	if len(lines) > 1 {
-		if lines[0] == "ctrl-d" {
+		switch lines[0] {
+		case "ctrl-f":
+			action = actionFork
+		case "ctrl-d":
 			action = actionDelete
 		}
 		row = lines[1]

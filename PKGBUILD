@@ -1,12 +1,12 @@
 pkgname=recall
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="Find, bookmark, and reopen local Codex and Claude conversations"
 arch=('x86_64' 'aarch64')
 url="https://github.com/jborlum/recall"
 license=('LicenseRef-All-Rights-Reserved')
 makedepends=('git' 'go')
-optdepends=('fzf: interactive fuzzy picker')
+depends=('fzf')
 options=('!debug')
 source=("${pkgname}-src::git+ssh://git@github.com/jborlum/recall.git#tag=v${pkgver}")
 sha256sums=('SKIP')

@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var version = "0.3.0"
+var version = "0.4.0"
 
 type session struct {
 	Provider string
@@ -52,7 +52,6 @@ type options struct {
 	provider string
 	cwd      string
 	limit    int
-	noFZF    bool
 	print    bool
 }
 
@@ -67,7 +66,6 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	flags.StringVar(&opts.provider, "provider", "", "only show codex or claude sessions")
 	flags.StringVar(&opts.cwd, "cwd", "", "only show sessions under this directory")
 	flags.IntVar(&opts.limit, "limit", 50, "maximum displayed results")
-	flags.BoolVar(&opts.noFZF, "no-fzf", false, "use the built-in numbered picker")
 	flags.BoolVar(&opts.print, "print", false, "print matching sessions and exit")
 	showVersion := flags.Bool("version", false, "print version")
 	flags.Usage = func() { usage(errOut) }
@@ -174,7 +172,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		return 0
 	}
 
-	selected, err := pick(matches, opts, in, out, errOut)
+	selected, action, err := pick(matches, opts, command != "pin", false, "recall> ", in, errOut)
 	if err != nil {
 		if !errors.Is(err, errCancelled) {
 			fmt.Fprintf(errOut, "recall: %v\n", err)
@@ -194,7 +192,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		fmt.Fprintf(out, "Pinned %s -> %s:%s\n", label, selected.Provider, selected.ID)
 		return 0
 	}
-	if err := launch(selected, command == "fork", in, out, errOut); err != nil {
+	if err := launch(selected, action == actionFork, in, out, errOut); err != nil {
 		if errors.Is(err, errCancelled) {
 			return 130
 		}
@@ -209,10 +207,9 @@ func usage(w io.Writer) {
 
 Usage:
   recall [flags] [QUERY]           search, select, and resume
-  recall [flags] fork [QUERY]      select and fork a session
   recall [flags] pin NAME [QUERY]  bookmark a selected session
   recall [flags] pin-active [NAME] bookmark the active session
-  recall [flags] bookmarks        open or delete bookmarks
+  recall [flags] bookmarks        resume, fork, or delete bookmarks
   recall unpin NAME                remove a bookmark only
   recall [flags] pins              list bookmarks
   recall [flags] doctor            report discovery and stale bookmarks
@@ -223,14 +220,13 @@ Flags:
   --provider codex|claude
   --cwd DIR
   --limit N
-  --no-fzf
   --print
   --version`)
 }
 
 func isCommand(value string) bool {
 	switch value {
-	case "fork", "pin", "pin-active", "bookmarks", "unpin", "pins", "doctor", "setup-omarchy", "help":
+	case "pin", "pin-active", "bookmarks", "unpin", "pins", "doctor", "setup-omarchy", "help":
 		return true
 	default:
 		return false
@@ -811,6 +807,14 @@ func shortHome(path string) string {
 
 var errCancelled = errors.New("selection cancelled")
 
+type selectionAction int
+
+const (
+	actionOpen selectionAction = iota
+	actionFork
+	actionDelete
+)
+
 func terminalIO(in io.Reader, out io.Writer) bool {
 	input, inputOK := in.(*os.File)
 	output, outputOK := out.(*os.File)
@@ -822,52 +826,46 @@ func terminalIO(in io.Reader, out io.Writer) bool {
 	return inErr == nil && outErr == nil && inInfo.Mode()&os.ModeCharDevice != 0 && outInfo.Mode()&os.ModeCharDevice != 0
 }
 
-func pick(sessions []session, opts options, in io.Reader, out, errOut io.Writer) (session, error) {
+func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt string, in io.Reader, errOut io.Writer) (session, selectionAction, error) {
 	limit := opts.limit
 	if len(sessions) < limit {
 		limit = len(sessions)
 	}
 	candidates := sessions[:limit]
-	if !opts.noFZF {
-		if path, err := exec.LookPath("fzf"); err == nil {
-			var input strings.Builder
-			for index, item := range candidates {
-				fmt.Fprintf(&input, "%d\t%s\n", index, displayLine(item))
-			}
-			var selected bytes.Buffer
-			cmd := exec.Command(path, "--delimiter=\\t", "--with-nth=2..", "--prompt=recall> ", "--height=80%", "--reverse")
-			cmd.Stdin = strings.NewReader(input.String())
-			cmd.Stdout = &selected
-			cmd.Stderr = errOut
-			if err := cmd.Run(); err != nil {
-				return session{}, errCancelled
-			}
-			field := strings.SplitN(strings.TrimSpace(selected.String()), "\t", 2)[0]
-			index, err := strconv.Atoi(field)
-			if err != nil || index < 0 || index >= len(candidates) {
-				return session{}, errors.New("invalid picker result")
-			}
-			return candidates[index], nil
-		}
+	path, err := exec.LookPath("fzf")
+	if err != nil {
+		return session{}, actionOpen, errors.New("fzf is required")
 	}
+	var input strings.Builder
 	for index, item := range candidates {
-		fmt.Fprintf(out, "%2d  %s\n", index+1, displayLine(item))
+		fmt.Fprintf(&input, "%d\t%s\n", index, displayLine(item))
 	}
-	fmt.Fprint(out, "Select session [1]: ")
-	reader := bufio.NewReader(in)
-	answer, err := reader.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return session{}, err
+	var selected bytes.Buffer
+	arguments := []string{"--delimiter=\\t", "--with-nth=2..", "--prompt=" + prompt, "--height=80%", "--reverse"}
+	if allowDelete {
+		arguments = append(arguments, "--expect=enter,ctrl-f,ctrl-d", "--header=Enter: resume   Ctrl-F: fork   Ctrl-D: delete   Esc: close")
+	} else if allowFork {
+		arguments = append(arguments, "--expect=enter,ctrl-f", "--header=Enter: resume   Ctrl-F: fork   Esc: close")
 	}
-	answer = strings.TrimSpace(answer)
-	if answer == "" {
-		answer = "1"
+	cmd := exec.Command(path, arguments...)
+	cmd.Stdin = strings.NewReader(input.String())
+	cmd.Stdout = &selected
+	cmd.Stderr = errOut
+	if err := cmd.Run(); err != nil {
+		return session{}, actionOpen, errCancelled
 	}
-	index, err := strconv.Atoi(answer)
-	if err != nil || index < 1 || index > len(candidates) {
-		return session{}, errors.New("invalid selection")
+	index := 0
+	action := actionOpen
+	if allowFork || allowDelete {
+		index, action, err = parseSelection(selected.String())
+	} else {
+		field := strings.SplitN(strings.TrimSpace(selected.String()), "\t", 2)[0]
+		index, err = strconv.Atoi(field)
 	}
-	return candidates[index-1], nil
+	if err != nil || index < 0 || index >= len(candidates) {
+		return session{}, actionOpen, errors.New("invalid picker result")
+	}
+	return candidates[index], action, nil
 }
 
 func launch(item session, fork bool, in io.Reader, out, errOut io.Writer) error {

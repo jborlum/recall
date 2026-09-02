@@ -63,7 +63,7 @@ mise exec -- env CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o recall .
 ```sh
 recall                         # search all sessions and resume one
 recall refresh token           # full-text search, then resume
-recall list cache              # print results without opening anything
+recall --print cache           # print results without opening anything
 recall --provider codex auth   # restrict results to Codex
 recall --cwd .                 # restrict results to this directory tree
 recall fork experiment         # fork the selected conversation

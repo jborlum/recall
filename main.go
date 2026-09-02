@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var version = "0.2.1"
+var version = "0.3.0"
 
 type session struct {
 	Provider string
@@ -53,6 +53,7 @@ type options struct {
 	cwd      string
 	limit    int
 	noFZF    bool
+	print    bool
 }
 
 func main() {
@@ -67,6 +68,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	flags.StringVar(&opts.cwd, "cwd", "", "only show sessions under this directory")
 	flags.IntVar(&opts.limit, "limit", 50, "maximum displayed results")
 	flags.BoolVar(&opts.noFZF, "no-fzf", false, "use the built-in numbered picker")
+	flags.BoolVar(&opts.print, "print", false, "print matching sessions and exit")
 	showVersion := flags.Bool("version", false, "print version")
 	flags.Usage = func() { usage(errOut) }
 	if err := flags.Parse(args); err != nil {
@@ -93,10 +95,6 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	if command == "help" {
 		usage(out)
 		return 0
-	}
-	if command == "setup" {
-		fmt.Fprintln(errOut, "recall: setup was renamed; use recall setup-omarchy")
-		return 2
 	}
 	if command == "setup-omarchy" {
 		return runSetupOmarchy(rest, out, errOut)
@@ -130,6 +128,10 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "recall: warning: %v\n", warning)
 	}
 	applyBookmarks(sessions, bookmarks)
+	if opts.print && command != "open" {
+		fmt.Fprintln(errOut, "recall: --print cannot be combined with a command")
+		return 2
+	}
 
 	switch command {
 	case "doctor":
@@ -167,7 +169,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "recall: no matching sessions")
 		return 1
 	}
-	if command == "list" || !terminalIO(in, out) {
+	if opts.print || !terminalIO(in, out) {
 		printSessions(out, matches, opts.limit)
 		return 0
 	}
@@ -207,7 +209,6 @@ func usage(w io.Writer) {
 
 Usage:
   recall [flags] [QUERY]           search, select, and resume
-  recall [flags] list [QUERY]      print matching sessions
   recall [flags] fork [QUERY]      select and fork a session
   recall [flags] pin NAME [QUERY]  bookmark a selected session
   recall [flags] pin-active [NAME] bookmark the active session
@@ -223,12 +224,13 @@ Flags:
   --cwd DIR
   --limit N
   --no-fzf
+  --print
   --version`)
 }
 
 func isCommand(value string) bool {
 	switch value {
-	case "open", "list", "fork", "pin", "pin-active", "bookmarks", "unpin", "pins", "doctor", "setup", "setup-omarchy", "help":
+	case "fork", "pin", "pin-active", "bookmarks", "unpin", "pins", "doctor", "setup-omarchy", "help":
 		return true
 	default:
 		return false

@@ -98,13 +98,3 @@ func TestSetupMigratesManualRecallBindings(t *testing.T) {
 		t.Fatalf("manual bindings were not migrated:\n%s", updated)
 	}
 }
-
-func TestOldSetupCommandFailsSafely(t *testing.T) {
-	var errors bytes.Buffer
-	if code := run([]string{"setup"}, &bytes.Buffer{}, &bytes.Buffer{}, &errors); code != 2 {
-		t.Fatalf("setup exit = %d", code)
-	}
-	if !strings.Contains(errors.String(), "setup-omarchy") {
-		t.Fatalf("error = %q", errors.String())
-	}
-}

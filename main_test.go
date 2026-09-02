@@ -110,6 +110,12 @@ func TestConfirm(t *testing.T) {
 	}
 }
 
+func TestListAndOpenAreQueriesNotCommands(t *testing.T) {
+	if isCommand("list") || isCommand("open") {
+		t.Fatal("list and open should be treated as search terms")
+	}
+}
+
 func TestDetectActiveSessionFromEnvironment(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "active-id")
 	t.Setenv("RECALL_PROC_ROOT", t.TempDir())

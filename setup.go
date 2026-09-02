@@ -22,6 +22,7 @@ const (
 type bindingState struct {
 	bookmark bool
 	manager  bool
+	legacy   bool
 	conflict string
 }
 
@@ -87,7 +88,7 @@ func installOmarchySetup(path string, out, errOut io.Writer) int {
 		return 1
 	}
 	managed := strings.Contains(string(data), setupBegin) && strings.Contains(string(data), setupEnd)
-	if state.bookmark && state.manager && managed {
+	if state.bookmark && state.manager && managed && !state.legacy {
 		fmt.Fprintln(out, "Recall hotkeys are already configured")
 		return 0
 	}
@@ -115,7 +116,7 @@ func installOmarchySetup(path string, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "recall: Hyprland validation failed; restored previous config: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(out, "Installed SUPER+ALT+B (bookmark) and SUPER+ALT+R (open bookmarks)")
+	fmt.Fprintln(out, "Installed SUPER+ALT+B (bookmark active) and SUPER+ALT+R (bookmark manager)")
 	fmt.Fprintf(out, "Backup: %s\n", backup)
 	return 0
 }
@@ -188,12 +189,18 @@ func inspectBindings(contents string) bindingState {
 		case strings.Contains(call.text, `"`+bookmarkKey+`"`):
 			if isRecallBookmarkBinding(call.text) {
 				state.bookmark = true
+				if strings.Contains(call.text, " pin-active\"") {
+					state.legacy = true
+				}
 			} else {
 				state.conflict = bookmarkKey + " is already assigned"
 			}
 		case strings.Contains(call.text, `"`+managerKey+`"`):
 			if isRecallManagerBinding(call.text) {
 				state.manager = true
+				if strings.Contains(call.text, " bookmarks\"") {
+					state.legacy = true
+				}
 			} else {
 				state.conflict = managerKey + " is already assigned"
 			}
@@ -212,10 +219,10 @@ func setupWord(configured bool) string {
 func appendManagedBindings(data []byte, binary string, state bindingState) []byte {
 	result := strings.TrimRight(string(data), "\n") + "\n\n" + setupBegin + "\n"
 	if !state.bookmark {
-		result += omarchyBinding(bookmarkKey, "Bookmark AI conversation", binary+" pin-active")
+		result += omarchyBinding(bookmarkKey, "Bookmark AI conversation", binary+" bookmark active")
 	}
 	if !state.manager {
-		result += omarchyBinding(managerKey, "Recall bookmarked conversation", binary+" bookmarks")
+		result += omarchyBinding(managerKey, "Recall bookmarked conversation", binary+" bookmark")
 	}
 	result += setupEnd + "\n"
 	return []byte(result)
@@ -297,11 +304,13 @@ func removeRecallBindings(data []byte) []byte {
 }
 
 func isRecallBookmarkBinding(call string) bool {
-	return strings.Contains(call, "Bookmark AI conversation") && strings.Contains(call, " pin-active")
+	return strings.Contains(call, "Bookmark AI conversation") &&
+		(strings.Contains(call, " bookmark active\"") || strings.Contains(call, " pin-active\""))
 }
 
 func isRecallManagerBinding(call string) bool {
-	return strings.Contains(call, "Recall bookmarked conversation") && strings.Contains(call, " bookmarks")
+	return strings.Contains(call, "Recall bookmarked conversation") &&
+		(strings.Contains(call, " bookmark\"") || strings.Contains(call, " bookmarks\""))
 }
 
 func replaceBindings(path string, previous, updated []byte, mode os.FileMode) (string, error) {

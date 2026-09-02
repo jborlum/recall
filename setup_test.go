@@ -22,7 +22,7 @@ func TestOmarchySetupLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(configured), setupBegin) || !strings.Contains(string(configured), " pin-active") || !strings.Contains(string(configured), " bookmarks") {
+	if !strings.Contains(string(configured), setupBegin) || !strings.Contains(string(configured), " bookmark active") || !strings.Contains(string(configured), " bookmark\"") {
 		t.Fatalf("missing managed bindings:\n%s", configured)
 	}
 

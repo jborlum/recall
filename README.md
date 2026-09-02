@@ -67,11 +67,11 @@ recall --provider codex auth   # restrict results to Codex
 recall --cwd .                 # restrict results to this directory tree
 recall experiment              # search; press Ctrl+F to fork the selection
 
-recall pin auth-design token   # bookmark a matching session as auth-design
-recall pin-active              # bookmark the currently active session
-recall bookmarks               # resume, fork, or delete bookmarks
-recall pins                    # print bookmarks
-recall unpin auth-design       # remove a bookmark, not its transcript
+recall bookmark add auth-design token # bookmark a matching session
+recall bookmark active           # bookmark the currently active session
+recall bookmark                 # resume, fork, or delete bookmarks
+recall bookmark list            # print bookmarks
+recall bookmark remove auth-design # remove only the bookmark
 recall doctor                  # report discovery and stale bookmarks
 ```
 
@@ -84,7 +84,7 @@ confirmation. Press `Esc` to close either picker.
 
 ## Global hotkeys
 
-`recall pin-active` detects live Codex and Claude processes. If one session is
+`recall bookmark active` detects live Codex and Claude processes. If one session is
 active, it opens the bookmark-name prompt immediately; if several are active,
 it first asks which one to bookmark.
 

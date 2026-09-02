@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var version = "0.4.0"
+var version = "0.5.0"
 
 type session struct {
 	Provider string
@@ -97,6 +97,27 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	if command == "setup-omarchy" {
 		return runSetupOmarchy(rest, out, errOut)
 	}
+	if command == "bookmark" {
+		if len(rest) == 0 {
+			command = "bookmarks"
+		} else {
+			subcommand := rest[0]
+			rest = rest[1:]
+			switch subcommand {
+			case "add":
+				command = "pin"
+			case "active":
+				command = "pin-active"
+			case "list":
+				command = "pins"
+			case "remove":
+				command = "unpin"
+			default:
+				fmt.Fprintln(errOut, "usage: recall bookmark [add|active|list|remove]")
+				return 2
+			}
+		}
+	}
 
 	bookmarks, err := loadBookmarks()
 	if err != nil {
@@ -105,7 +126,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	}
 	if command == "unpin" {
 		if len(rest) != 1 {
-			fmt.Fprintln(errOut, "usage: recall unpin NAME")
+			fmt.Fprintln(errOut, "usage: recall bookmark remove NAME")
 			return 2
 		}
 		if _, ok := bookmarks[rest[0]]; !ok {
@@ -117,7 +138,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 			fmt.Fprintf(errOut, "recall: save bookmarks: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(out, "Unpinned %s\n", rest[0])
+		fmt.Fprintf(out, "Removed bookmark %s\n", rest[0])
 		return 0
 	}
 
@@ -148,7 +169,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	queryArgs := rest
 	if command == "pin" {
 		if len(rest) == 0 {
-			fmt.Fprintln(errOut, "usage: recall pin NAME [QUERY]")
+			fmt.Fprintln(errOut, "usage: recall bookmark add NAME [QUERY]")
 			return 2
 		}
 		label, queryArgs = rest[0], rest[1:]
@@ -189,7 +210,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 			fmt.Fprintf(errOut, "recall: save bookmarks: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(out, "Pinned %s -> %s:%s\n", label, selected.Provider, selected.ID)
+		fmt.Fprintf(out, "Added bookmark %s -> %s:%s\n", label, selected.Provider, selected.ID)
 		return 0
 	}
 	if err := launch(selected, action == actionFork, in, out, errOut); err != nil {
@@ -207,11 +228,13 @@ func usage(w io.Writer) {
 
 Usage:
   recall [flags] [QUERY]           search, select, and resume
-  recall [flags] pin NAME [QUERY]  bookmark a selected session
-  recall [flags] pin-active [NAME] bookmark the active session
-  recall [flags] bookmarks        resume, fork, or delete bookmarks
-  recall unpin NAME                remove a bookmark only
-  recall [flags] pins              list bookmarks
+  recall [flags] bookmark          resume, fork, or delete bookmarks
+  recall [flags] bookmark add NAME [QUERY]
+                                    bookmark a selected session
+  recall [flags] bookmark active [NAME]
+                                    bookmark the active session
+  recall [flags] bookmark list      print bookmarks
+  recall bookmark remove NAME       remove a bookmark only
   recall [flags] doctor            report discovery and stale bookmarks
   recall setup-omarchy [status|remove]
                                     manage Omarchy global hotkeys
@@ -226,7 +249,7 @@ Flags:
 
 func isCommand(value string) bool {
 	switch value {
-	case "pin", "pin-active", "bookmarks", "unpin", "pins", "doctor", "setup-omarchy", "help":
+	case "bookmark", "doctor", "setup-omarchy", "help":
 		return true
 	default:
 		return false

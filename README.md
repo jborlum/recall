@@ -16,6 +16,10 @@ or network service.
 - Resume and fork sessions through the provider CLI.
 - Keep all bookmark data in one small local JSON file.
 
+The picker searches the full visible user and assistant transcript text while
+displaying a compact session summary. Internal or encrypted provider fields are
+not searched.
+
 ## Requirements
 
 - The `codex` and/or `claude` CLI.

@@ -19,6 +19,7 @@ func TestDiscoverCodexAndClaude(t *testing.T) {
 	writeFixture(t, codexPath, `{"type":"session_meta","timestamp":"2026-09-01T12:00:00Z","payload":{"id":"codex-id","cwd":"/work/api","timestamp":"2026-09-01T12:00:00Z"}}
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>ignored</environment_context>"}]}}
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fix refresh token rotation"}]}}
+{"type":"response_item","payload":{"type":"reasoning","encrypted_content":"secret-token-never-searchable"}}
 `)
 	claudePath := filepath.Join(temp, "claude", "projects", "project", "claude-id.jsonl")
 	writeFixture(t, claudePath, `{"type":"user","sessionId":"claude-id","cwd":"/work/web","timestamp":"2026-09-02T12:00:00Z","message":{"role":"user","content":"Explain the cache invalidation"}}
@@ -38,6 +39,12 @@ func TestDiscoverCodexAndClaude(t *testing.T) {
 	if got := byProvider["codex"].Title; got != "Fix refresh token rotation" {
 		t.Fatalf("codex title = %q", got)
 	}
+	if got := byProvider["codex"].SearchText; !strings.Contains(got, "Fix refresh token rotation") {
+		t.Fatalf("codex search text = %q", got)
+	}
+	if strings.Contains(byProvider["codex"].SearchText, "secret-token-never-searchable") {
+		t.Fatal("encrypted reasoning content leaked into search text")
+	}
 	if got := byProvider["claude"].Title; got != "Explain the cache invalidation" {
 		t.Fatalf("claude title = %q", got)
 	}
@@ -50,8 +57,8 @@ func TestSearchAndBookmarkRanking(t *testing.T) {
 	writeFixture(t, first, `{"message":"database migration"}`)
 	writeFixture(t, second, `{"message":"unrelated"}`)
 	sessions := []session{
-		{Provider: "codex", ID: "one", Title: "Migration", Path: first, Updated: time.Unix(1, 0)},
-		{Provider: "claude", ID: "two", Title: "Other", Path: second, Updated: time.Unix(2, 0)},
+		{Provider: "codex", ID: "one", Title: "Migration", Path: first, SearchText: "database migration", Updated: time.Unix(1, 0)},
+		{Provider: "claude", ID: "two", Title: "Other", Path: second, SearchText: "unrelated", Updated: time.Unix(2, 0)},
 	}
 	bookmarks := map[string]bookmark{"db": {Provider: "codex", SessionID: "one"}}
 	applyBookmarks(sessions, bookmarks)

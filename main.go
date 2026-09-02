@@ -18,20 +18,21 @@ import (
 	"time"
 )
 
-var version = "0.6.0"
+var version = "0.7.0"
 
 type session struct {
-	Provider string
-	ID       string
-	Title    string
-	CWD      string
-	Path     string
-	Updated  time.Time
-	Archived bool
-	Missing  bool
-	Label    string
-	Note     string
-	Score    int
+	Provider   string
+	ID         string
+	Title      string
+	CWD        string
+	Path       string
+	Updated    time.Time
+	SearchText string
+	Archived   bool
+	Missing    bool
+	Label      string
+	Note       string
+	Score      int
 }
 
 type bookmark struct {
@@ -398,14 +399,14 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 				result.Updated = parsed
 			}
 		}
-		if result.Title == "" && event.Type == "response_item" && event.Payload.Type == "message" && event.Payload.Role == "user" {
+		if event.Type == "response_item" && event.Payload.Type == "message" && (event.Payload.Role == "user" || event.Payload.Role == "assistant") {
 			text := contentText(event.Payload.Content)
-			if usableTitle(text) {
-				result.Title = oneLine(text, 100)
+			result.SearchText = appendSearchText(result.SearchText, text)
+			if result.Title == "" && event.Payload.Role == "user" {
+				if usableTitle(text) {
+					result.Title = oneLine(text, 100)
+				}
 			}
-		}
-		if result.ID != "" && result.CWD != "" && result.Title != "" {
-			break
 		}
 	}
 	if result.ID == "" {
@@ -444,26 +445,35 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 		if parsed := parseTime(event.Timestamp); parsed.After(result.Updated) {
 			result.Updated = parsed
 		}
-		if result.Title == "" && len(event.Message) > 0 {
+		if len(event.Message) > 0 {
 			var message struct {
 				Role    string          `json:"role"`
 				Content json.RawMessage `json:"content"`
 			}
-			if json.Unmarshal(event.Message, &message) == nil && message.Role == "user" {
+			if json.Unmarshal(event.Message, &message) == nil && (message.Role == "user" || message.Role == "assistant") {
 				text := contentText(message.Content)
-				if usableTitle(text) {
+				result.SearchText = appendSearchText(result.SearchText, text)
+				if result.Title == "" && message.Role == "user" && usableTitle(text) {
 					result.Title = oneLine(text, 100)
 				}
 			}
-		}
-		if result.ID != "" && result.CWD != "" && result.Title != "" {
-			break
 		}
 	}
 	if result.ID == "" {
 		result.ID = idFromFilename(path)
 	}
 	return result, result.ID != ""
+}
+
+func appendSearchText(existing, text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return existing
+	}
+	if existing != "" {
+		existing += " "
+	}
+	return existing + text
 }
 
 func newScanner(reader io.Reader) *bufio.Scanner {
@@ -579,11 +589,11 @@ func filterAndRank(sessions []session, bookmarks map[string]bookmark, query stri
 	tokens := strings.Fields(strings.ToLower(query))
 	result := make([]session, 0, len(sessions))
 	for _, item := range sessions {
-		haystack := strings.ToLower(strings.Join([]string{item.Provider, item.ID, item.Title, item.CWD, item.Label, item.Note}, " "))
-		metadataMatch := containsAll(haystack, tokens)
+		metadata := strings.ToLower(strings.Join([]string{item.Provider, item.ID, item.Title, item.CWD, item.Label, item.Note}, " "))
+		metadataMatch := containsAll(metadata, tokens)
 		contentMatch := false
 		if len(tokens) > 0 && !metadataMatch {
-			contentMatch = fileContainsAll(item.Path, tokens)
+			contentMatch = containsAll(strings.ToLower(item.SearchText), tokens)
 		}
 		if len(tokens) > 0 && !metadataMatch && !contentMatch {
 			continue
@@ -607,30 +617,6 @@ func containsAll(haystack string, tokens []string) bool {
 		}
 	}
 	return true
-}
-
-func fileContainsAll(path string, tokens []string) bool {
-	file, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-	found := make([]bool, len(tokens))
-	remaining := len(tokens)
-	scanner := newScanner(file)
-	for scanner.Scan() {
-		line := bytes.ToLower(scanner.Bytes())
-		for index, token := range tokens {
-			if !found[index] && bytes.Contains(line, []byte(token)) {
-				found[index] = true
-				remaining--
-			}
-		}
-		if remaining == 0 {
-			return true
-		}
-	}
-	return remaining == 0
 }
 
 func score(item session, tokens []string, metadataMatch bool) int {
@@ -811,6 +797,12 @@ func displayLine(item session) string {
 	return fmt.Sprintf("%s %-6s %s  %-72s  %s%s", mark, item.Provider, date, title, shortHome(item.CWD), status)
 }
 
+func pickerText(item session) string {
+	return strings.Join(strings.Fields(strings.Join([]string{
+		item.Provider, item.ID, item.Title, item.CWD, item.Label, item.Note, item.SearchText,
+	}, " ")), " ")
+}
+
 func oneLine(value string, limit int) string {
 	value = strings.Join(strings.Fields(value), " ")
 	runes := []rune(value)
@@ -861,10 +853,11 @@ func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt 
 	}
 	var input strings.Builder
 	for index, item := range candidates {
-		fmt.Fprintf(&input, "%d\t%s\n", index, displayLine(item))
+		// Keep the transcript searchable without adding it to the visible row.
+		fmt.Fprintf(&input, "%d\t\x1b[8m%s\x1b[0m\t%s\n", index, pickerText(item), displayLine(item))
 	}
 	var selected bytes.Buffer
-	arguments := []string{"--delimiter=\\t", "--with-nth=2..", "--prompt=" + prompt, "--height=80%", "--reverse"}
+	arguments := []string{"--ansi", "--delimiter=\\t", "--nth=2,3", "--prompt=" + prompt, "--height=80%", "--reverse"}
 	if allowDelete {
 		arguments = append(arguments, "--expect=enter,ctrl-f,ctrl-d", "--header=Enter: resume   Ctrl-F: fork   Ctrl-D: delete   Esc: close")
 	} else if allowFork {

@@ -94,6 +94,10 @@ For Omarchy/Hyprland, install the global hotkeys with:
 recall setup-omarchy
 ```
 
+This installs `SUPER+ALT+B` for bookmarking the active session,
+`SUPER+ALT+R` for the bookmark manager, and `SUPER+ALT+L` for the normal
+session picker.
+
 The setup command checks for conflicts, backs up `~/.config/hypr/bindings.lua`,
 adds only missing bindings, and reloads and validates Hyprland. It is safe to
 run more than once. Inspect or remove the integration with:

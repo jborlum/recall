@@ -1,4 +1,5 @@
 /recall
+/recall-src/
 /*.pkg.tar.*
 /pkg/
 /src/

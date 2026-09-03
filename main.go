@@ -383,6 +383,10 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 	}
 	defer file.Close()
 	result := session{Provider: "codex", Path: path, Updated: info.ModTime(), Archived: archived}
+	// A batch of codex exec jobs that dies before its first exchange leaves
+	// transcripts holding only the system prompt and a task_started marker. There
+	// is no conversation in them to title or resume, so they are not reported.
+	spoken := false
 	transcriptLines(file, func(line []byte) {
 		var event codexEnvelope
 		if json.Unmarshal(line, &event) != nil {
@@ -392,6 +396,9 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 			result.ID = firstNonEmpty(event.Payload.ID, event.Payload.SessionID)
 			result.CWD = event.Payload.CWD
 			result.Title = firstNonEmpty(event.Payload.Name, event.Payload.Title)
+			if result.Title != "" {
+				spoken = true
+			}
 			if parsed := parseTime(firstNonEmpty(event.Payload.Timestamp, event.Timestamp)); result.Updated.IsZero() && !parsed.IsZero() {
 				result.Updated = parsed
 			}
@@ -399,6 +406,11 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 		if event.Type == "response_item" && event.Payload.Type == "message" && (event.Payload.Role == "user" || event.Payload.Role == "assistant") {
 			text := contentText(event.Payload.Content)
 			result.SearchText = appendSearchText(result.SearchText, text)
+			// Any message at all is a conversation, even the preambles that make a
+			// poor title, so nothing that was actually said is hidden.
+			if strings.TrimSpace(text) != "" {
+				spoken = true
+			}
 			if result.Title == "" && event.Payload.Role == "user" {
 				if usableTitle(text) {
 					result.Title = oneLine(text, 100)
@@ -409,7 +421,7 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 	if result.ID == "" {
 		result.ID = idFromFilename(path)
 	}
-	return result, result.ID != ""
+	return result, result.ID != "" && spoken
 }
 
 type claudeEvent struct {

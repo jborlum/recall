@@ -532,6 +532,44 @@ func TestPickerTextStripsControlCharacters(t *testing.T) {
 	}
 }
 
+// A codex exec batch that dies before its first exchange leaves transcripts
+// holding only the system prompt and a task_started marker. Seven such files sat
+// in one real store, all showing as (untitled) with nothing to resume.
+func TestCodexSessionWithoutAnyExchangeIsNotReported(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("HOME", temp)
+	t.Setenv("CODEX_HOME", filepath.Join(temp, "codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(temp, "claude"))
+	dir := filepath.Join(temp, "codex", "sessions")
+	writeFixture(t, filepath.Join(dir, "died.jsonl"),
+		`{"type":"session_meta","payload":{"id":"died","cwd":"/work","originator":"codex_exec"}}`+"\n"+
+			`{"type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}`+"\n")
+	// A session that got as far as one message is real and must be kept, even
+	// though the preamble it opens with makes an unusable title.
+	writeFixture(t, filepath.Join(dir, "spoke.jsonl"),
+		`{"type":"session_meta","payload":{"id":"spoke","cwd":"/work"}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions"}]}}`+"\n")
+	// A named session with no messages is still identifiable, so it survives too.
+	writeFixture(t, filepath.Join(dir, "named.jsonl"),
+		`{"type":"session_meta","payload":{"id":"named","cwd":"/work","name":"Nightly review"}}`+"\n"+
+			`{"type":"event_msg","payload":{"type":"task_started","turn_id":"t2"}}`+"\n")
+
+	sessions, _ := discover(options{})
+	kept := map[string]string{}
+	for _, item := range sessions {
+		kept[item.ID] = item.Title
+	}
+	if _, ok := kept["died"]; ok {
+		t.Error("a codex session with no exchange at all should not be reported")
+	}
+	if _, ok := kept["spoke"]; !ok {
+		t.Error("a codex session that exchanged a message must be kept")
+	}
+	if got := kept["named"]; got != "Nightly review" {
+		t.Errorf("named session = %q, want it kept with its name", got)
+	}
+}
+
 // Claude Code generates a short aiTitle for most sessions, which reads far better
 // in a row than a truncated opening message or a compaction summary.
 func TestAITitleWinsOverSummaryAndOpeningMessage(t *testing.T) {

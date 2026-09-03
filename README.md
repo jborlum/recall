@@ -87,7 +87,7 @@ Encrypted and internal provider fields are excluded.
 The list keeps its provider, date, and title columns while you type. The panel
 below shows every match in the selected conversation, each numbered `3/12` and
 given the lines around it, with your terms marked. `Shift-Up`/`Shift-Down` and
-`Alt-Up`/`Alt-Down` walk through the matches and wrap around at the end;
+`Alt-Up`/`Alt-Down` walk through the matches and stop at either end;
 `Ctrl-/` hides the panel. With no search term the panel shows the conversation
 from the start.
 

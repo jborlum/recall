@@ -171,6 +171,42 @@ func TestPreviewReadsCodexTranscripts(t *testing.T) {
 	}
 }
 
+func TestCodexPreviewHidesBootstrapMessages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	writeFixture(t, path,
+		`{"type":"session_meta","payload":{"id":"c","cwd":"/work","thread_source":"user","source":"cli"}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context><cwd>/work</cwd></environment_context>"}]}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /work"}]}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fix the refresh token"}]}}`+"\n")
+	var out, errOut bytes.Buffer
+	if code := previewTranscript(path, "", &out, &errOut); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errOut.String())
+	}
+	text := stripANSI(out.String())
+	if !strings.Contains(text, "Fix the refresh token") {
+		t.Errorf("visible user turn missing: %q", text)
+	}
+	for _, hidden := range []string{"environment_context", "AGENTS.md"} {
+		if strings.Contains(text, hidden) {
+			t.Errorf("%q leaked into preview: %q", hidden, text)
+		}
+	}
+}
+
+func TestCodexPreviewHidesInternalSubagentTranscript(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guardian.jsonl")
+	writeFixture(t, path,
+		`{"type":"session_meta","payload":{"id":"guardian","cwd":"/work","thread_source":"guardian_review","source":{"subagent":{"other":"guardian"}}}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"The following is the Codex agent history whose request action you are assessing"}]}}`+"\n")
+	var out, errOut bytes.Buffer
+	if code := previewTranscript(path, "request", &out, &errOut); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errOut.String())
+	}
+	if strings.TrimSpace(stripANSI(out.String())) != "" {
+		t.Fatalf("internal subagent transcript leaked into preview: %q", out.String())
+	}
+}
+
 func TestPreviewReportsAMissingFile(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := previewTranscript(filepath.Join(t.TempDir(), "gone.jsonl"), "", &out, &errOut); code == 0 {

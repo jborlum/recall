@@ -211,7 +211,15 @@ func transcriptTurns(path string, fn func(role, text string)) error {
 		return err
 	}
 	defer file.Close()
+	internalCodex := false
 	transcriptLines(file, func(line []byte) {
+		if meta, internal := codexSessionMetadata(line); meta {
+			internalCodex = internal
+			return
+		}
+		if internalCodex {
+			return
+		}
 		if role, text, ok := codexTurn(line); ok {
 			fn(role, text)
 			return
@@ -223,12 +231,20 @@ func transcriptTurns(path string, fn func(role, text string)) error {
 	return nil
 }
 
+func codexSessionMetadata(line []byte) (bool, bool) {
+	var event codexEnvelope
+	if json.Unmarshal(line, &event) != nil || event.Type != "session_meta" {
+		return false, false
+	}
+	return true, internalCodexSession(event)
+}
+
 func codexTurn(line []byte) (string, string, bool) {
 	var event codexEnvelope
-	if json.Unmarshal(line, &event) != nil || event.Payload.Type != "message" {
+	if json.Unmarshal(line, &event) != nil {
 		return "", "", false
 	}
-	return speech(event.Payload.Role, contentText(event.Payload.Content))
+	return visibleCodexTurn(event)
 }
 
 func claudeTurn(line []byte) (string, string, bool) {

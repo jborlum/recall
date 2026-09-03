@@ -44,6 +44,9 @@ func TestDiscoverCodexAndClaude(t *testing.T) {
 	if got := byProvider["codex"].SearchText; !strings.Contains(got, "Fix refresh token rotation") {
 		t.Fatalf("codex search text = %q", got)
 	}
+	if strings.Contains(byProvider["codex"].SearchText, "environment_context") {
+		t.Fatal("Codex environment bootstrap leaked into search text")
+	}
 	if strings.Contains(byProvider["codex"].SearchText, "secret-token-never-searchable") {
 		t.Fatal("encrypted reasoning content leaked into search text")
 	}
@@ -279,7 +282,7 @@ func TestPickMapsSelectionBackToItsSession(t *testing.T) {
 		t.Run(item.name, func(t *testing.T) {
 			bin := t.TempDir()
 			stub := filepath.Join(bin, "fzf")
-			writeFixture(t, stub, "#!/bin/sh\n"+item.body+"\n")
+			writeFixture(t, stub, "#!/bin/sh\ncase \"$*\" in *cycle*) exit 2 ;; esac\n"+item.body+"\n")
 			if err := os.Chmod(stub, 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -544,8 +547,7 @@ func TestCodexSessionWithoutAnyExchangeIsNotReported(t *testing.T) {
 	writeFixture(t, filepath.Join(dir, "died.jsonl"),
 		`{"type":"session_meta","payload":{"id":"died","cwd":"/work","originator":"codex_exec"}}`+"\n"+
 			`{"type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}`+"\n")
-	// A session that got as far as one message is real and must be kept, even
-	// though the preamble it opens with makes an unusable title.
+	// A bootstrap record encoded with role=user is still not a conversation.
 	writeFixture(t, filepath.Join(dir, "spoke.jsonl"),
 		`{"type":"session_meta","payload":{"id":"spoke","cwd":"/work"}}`+"\n"+
 			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions"}]}}`+"\n")
@@ -562,11 +564,63 @@ func TestCodexSessionWithoutAnyExchangeIsNotReported(t *testing.T) {
 	if _, ok := kept["died"]; ok {
 		t.Error("a codex session with no exchange at all should not be reported")
 	}
-	if _, ok := kept["spoke"]; !ok {
-		t.Error("a codex session that exchanged a message must be kept")
+	if _, ok := kept["spoke"]; ok {
+		t.Error("a codex session containing only AGENTS bootstrap text should not be reported")
 	}
 	if got := kept["named"]; got != "Nightly review" {
 		t.Errorf("named session = %q, want it kept with its name", got)
+	}
+}
+
+func TestCodexInternalSubagentSessionIsNotReported(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("HOME", temp)
+	t.Setenv("CODEX_HOME", filepath.Join(temp, "codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(temp, "claude"))
+	path := filepath.Join(temp, "codex", "sessions", "guardian.jsonl")
+	writeFixture(t, path,
+		`{"type":"session_meta","payload":{"id":"guardian","cwd":"/work","thread_source":"guardian_review","source":{"subagent":{"other":"guardian"}}}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"The following is the Codex agent history whose request action you are assessing"}]}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"outcome\":\"allow\"}"}]}}`+"\n")
+
+	sessions, warnings := discover(options{})
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("internal subagent session was reported: %#v", sessions)
+	}
+}
+
+func TestCodexBoilerplateDoesNotAffectTitleOrSearch(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("HOME", temp)
+	t.Setenv("CODEX_HOME", filepath.Join(temp, "codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(temp, "claude"))
+	path := filepath.Join(temp, "codex", "sessions", "normal.jsonl")
+	writeFixture(t, path,
+		`{"type":"session_meta","payload":{"id":"normal","cwd":"/work","thread_source":"user","source":"cli"}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context><cwd>/work</cwd></environment_context>"}]}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /work"}]}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fix the refresh token"}]}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I fixed the token rotation"}]}}`+"\n")
+
+	sessions, _ := discover(options{})
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	if sessions[0].Title != "Fix the refresh token" {
+		t.Fatalf("title = %q", sessions[0].Title)
+	}
+	for _, hidden := range []string{"environment_context", "AGENTS.md"} {
+		if strings.Contains(sessions[0].SearchText, hidden) {
+			t.Errorf("%q leaked into search text: %q", hidden, sessions[0].SearchText)
+		}
+	}
+	for _, visible := range []string{"Fix the refresh token", "I fixed the token rotation"} {
+		if !strings.Contains(sessions[0].SearchText, visible) {
+			t.Errorf("visible message %q missing from search text", visible)
+		}
 	}
 }
 

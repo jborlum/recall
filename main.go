@@ -18,7 +18,7 @@ import (
 	"unicode"
 )
 
-var version = "0.11.0"
+var version = "0.12.0"
 
 type session struct {
 	Provider   string
@@ -374,15 +374,17 @@ type codexEnvelope struct {
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
 	Payload   struct {
-		Type      string          `json:"type"`
-		Role      string          `json:"role"`
-		ID        string          `json:"id"`
-		SessionID string          `json:"session_id"`
-		CWD       string          `json:"cwd"`
-		Timestamp string          `json:"timestamp"`
-		Name      string          `json:"name"`
-		Title     string          `json:"title"`
-		Content   json.RawMessage `json:"content"`
+		Type         string          `json:"type"`
+		Role         string          `json:"role"`
+		ID           string          `json:"id"`
+		SessionID    string          `json:"session_id"`
+		CWD          string          `json:"cwd"`
+		Timestamp    string          `json:"timestamp"`
+		Name         string          `json:"name"`
+		Title        string          `json:"title"`
+		ThreadSource string          `json:"thread_source"`
+		Source       json.RawMessage `json:"source"`
+		Content      json.RawMessage `json:"content"`
 	} `json:"payload"`
 }
 
@@ -397,12 +399,17 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 	// transcripts holding only the system prompt and a task_started marker. There
 	// is no conversation in them to title or resume, so they are not reported.
 	spoken := false
+	internal := false
 	transcriptLines(file, func(line []byte) {
 		var event codexEnvelope
 		if json.Unmarshal(line, &event) != nil {
 			return
 		}
 		if event.Type == "session_meta" {
+			if internalCodexSession(event) {
+				internal = true
+				return
+			}
 			result.ID = firstNonEmpty(event.Payload.ID, event.Payload.SessionID)
 			result.CWD = event.Payload.CWD
 			result.Title = firstNonEmpty(event.Payload.Name, event.Payload.Title)
@@ -413,15 +420,15 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 				result.Updated = parsed
 			}
 		}
-		if event.Type == "response_item" && event.Payload.Type == "message" && (event.Payload.Role == "user" || event.Payload.Role == "assistant") {
-			text := contentText(event.Payload.Content)
+		if internal {
+			return
+		}
+		if role, text, ok := visibleCodexTurn(event); ok {
 			result.SearchText = appendSearchText(result.SearchText, text)
-			// Any message at all is a conversation, even the preambles that make a
-			// poor title, so nothing that was actually said is hidden.
 			if strings.TrimSpace(text) != "" {
 				spoken = true
 			}
-			if result.Title == "" && event.Payload.Role == "user" {
+			if result.Title == "" && role == "user" {
 				if usableTitle(text) {
 					result.Title = oneLine(text, 100)
 				}
@@ -431,7 +438,47 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 	if result.ID == "" {
 		result.ID = idFromFilename(path)
 	}
-	return result, result.ID != "" && spoken
+	return result, !internal && result.ID != "" && spoken
+}
+
+// internalCodexSession identifies conversations created for Codex itself rather
+// than by the person using it. Guardian reviews are currently represented as
+// subagent sessions whose messages contain a serialized copy of the parent
+// conversation; indexing them produces duplicate, misleading rows and previews.
+func internalCodexSession(event codexEnvelope) bool {
+	if event.Type != "session_meta" {
+		return false
+	}
+	if event.Payload.ThreadSource == "guardian_review" {
+		return true
+	}
+	var source struct {
+		Subagent json.RawMessage `json:"subagent"`
+	}
+	if json.Unmarshal(event.Payload.Source, &source) != nil {
+		return false
+	}
+	value := strings.TrimSpace(string(source.Subagent))
+	return value != "" && value != "null"
+}
+
+func visibleCodexTurn(event codexEnvelope) (string, string, bool) {
+	if event.Type != "response_item" || event.Payload.Type != "message" {
+		return "", "", false
+	}
+	role, text, ok := speech(event.Payload.Role, contentText(event.Payload.Content))
+	if !ok || role == "user" && codexBoilerplate(text) {
+		return "", "", false
+	}
+	return role, text, true
+}
+
+// codexBoilerplate is injected into the model as a user-role message but was
+// not typed by the user and should not appear in titles, search, or previews.
+func codexBoilerplate(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "<environment_context>") ||
+		strings.HasPrefix(value, "# AGENTS.md")
 }
 
 type claudeEvent struct {
@@ -1106,10 +1153,9 @@ func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt 
 	arguments := []string{
 		"--ansi", "--delimiter=\\t", "--with-nth=2", "--ellipsis=", "--no-hscroll",
 		"--prompt=" + prompt, "--height=80%", "--reverse",
-		// cycle lets the panel wrap from the last match back to the first, so the
-		// scroll keys walk the matches round. ctrl-p is left alone: fzf binds it to
-		// up-match, and taking it would cost a navigation key.
-		"--preview=" + previewCommand(), "--preview-window=down,55%,wrap,cycle,border-top",
+		// ctrl-p is left alone: fzf binds it to up-match, and taking it would cost
+		// a navigation key.
+		"--preview=" + previewCommand(), "--preview-window=down,55%,wrap,border-top",
 		"--bind=ctrl-/:toggle-preview",
 		"--bind=alt-down:preview-half-page-down", "--bind=alt-up:preview-half-page-up",
 	}

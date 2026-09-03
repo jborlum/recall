@@ -32,16 +32,15 @@ This repository doubles as its own Homebrew tap, so no clone is needed:
 
 ```sh
 brew tap jborlum/recall https://github.com/jborlum/recall.git
-brew install --HEAD jborlum/recall/recall
+brew install jborlum/recall/recall
 ```
 
 Homebrew requires formulae to live in a tap, so `brew install ./Formula/recall.rb`
-does not work. `--HEAD` is required because there is no bottled release; it
-builds the current `main`, not your working tree. Upgrade with:
+is rejected. Installing by full name also records the formula as trusted, which
+Homebrew requires for taps outside homebrew-core.
 
-```sh
-brew upgrade --fetch-HEAD jborlum/recall/recall
-```
+Add `--HEAD` to build the current `main` instead of the latest release, and
+upgrade a `--HEAD` install with `brew upgrade --fetch-HEAD`.
 
 For global hotkeys:
 

@@ -418,6 +418,7 @@ type claudeEvent struct {
 	CWD       string          `json:"cwd"`
 	Timestamp string          `json:"timestamp"`
 	Summary   string          `json:"summary"`
+	AITitle   string          `json:"aiTitle"`
 	Message   json.RawMessage `json:"message"`
 }
 
@@ -432,6 +433,10 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 	// leaves a file holding nothing but the bookkeeping for that command. Such a
 	// session has nothing to resume and no title to show, so it is not reported.
 	spoken := false
+	// Titles are resolved after the whole transcript is read, because the best
+	// source is not the first one seen. Claude Code writes a short generated
+	// aiTitle, which beats a compaction summary and beats the opening message.
+	var aiTitle, summary, opening string
 	transcriptLines(file, func(line []byte) {
 		var event claudeEvent
 		if json.Unmarshal(line, &event) != nil {
@@ -439,8 +444,13 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 		}
 		result.ID = firstNonEmpty(result.ID, event.SessionID)
 		result.CWD = firstNonEmpty(result.CWD, event.CWD)
+		if event.AITitle != "" {
+			// Deliberately not treated as content: a transcript carrying only a
+			// generated title still has no conversation to resume.
+			aiTitle = event.AITitle
+		}
 		if event.Summary != "" {
-			result.Title = oneLine(event.Summary, 100)
+			summary = event.Summary
 			spoken = true
 		}
 		if parsed := parseTime(event.Timestamp); parsed.After(result.Updated) {
@@ -461,12 +471,13 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 				if !strings.HasPrefix(strings.TrimSpace(text), commandCaveat) {
 					result.SearchText = appendSearchText(result.SearchText, text)
 				}
-				if result.Title == "" && message.Role == "user" && usableTitle(text) {
-					result.Title = oneLine(text, 100)
+				if opening == "" && message.Role == "user" && usableTitle(text) {
+					opening = text
 				}
 			}
 		}
 	})
+	result.Title = oneLine(firstNonEmpty(aiTitle, summary, opening), 100)
 	if result.ID == "" {
 		result.ID = idFromFilename(path)
 	}

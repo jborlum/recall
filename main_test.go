@@ -532,6 +532,68 @@ func TestPickerTextStripsControlCharacters(t *testing.T) {
 	}
 }
 
+// Claude Code generates a short aiTitle for most sessions, which reads far better
+// in a row than a truncated opening message or a compaction summary.
+func TestAITitleWinsOverSummaryAndOpeningMessage(t *testing.T) {
+	temp := claudeOnly(t)
+	writeFixture(t, filepath.Join(temp, "claude", "projects", "p", "titled.jsonl"),
+		claudeUser("titled", "Help me check the Bridgev2 backfill progress and then explain it")+
+			claudeAssistant("titled", "Looking now")+
+			`{"type":"summary","sessionId":"titled","summary":"A long compaction summary of everything"}`+"\n"+
+			`{"type":"ai-title","sessionId":"titled","aiTitle":"Bridgev2 backfill progress"}`+"\n")
+
+	sessions, _ := discover(options{})
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	if got := sessions[0].Title; got != "Bridgev2 backfill progress" {
+		t.Fatalf("title = %q, want the generated aiTitle", got)
+	}
+}
+
+// Order in the file must not decide the winner: aiTitle can appear before the
+// summary just as easily as after it.
+func TestAITitleWinsRegardlessOfRecordOrder(t *testing.T) {
+	temp := claudeOnly(t)
+	writeFixture(t, filepath.Join(temp, "claude", "projects", "p", "order.jsonl"),
+		`{"type":"ai-title","sessionId":"order","aiTitle":"Generated title"}`+"\n"+
+			claudeUser("order", "Opening message")+
+			claudeAssistant("order", "Reply")+
+			`{"type":"summary","sessionId":"order","summary":"Compaction summary"}`+"\n")
+
+	sessions, _ := discover(options{})
+	if len(sessions) != 1 || sessions[0].Title != "Generated title" {
+		t.Fatalf("title = %#v, want the aiTitle to win", sessions)
+	}
+}
+
+// Without an aiTitle the summary is still preferred over the opening message.
+func TestSummaryStillBeatsOpeningMessage(t *testing.T) {
+	temp := claudeOnly(t)
+	writeFixture(t, filepath.Join(temp, "claude", "projects", "p", "sum.jsonl"),
+		claudeUser("sum", "Opening message")+
+			`{"type":"summary","sessionId":"sum","summary":"Compaction summary"}`+"\n")
+
+	sessions, _ := discover(options{})
+	if len(sessions) != 1 || sessions[0].Title != "Compaction summary" {
+		t.Fatalf("title = %#v, want the summary", sessions)
+	}
+}
+
+// A transcript holding a generated title but no conversation is still empty, so
+// the title must not resurrect it.
+func TestAITitleAloneIsNotContent(t *testing.T) {
+	temp := claudeOnly(t)
+	writeFixture(t, filepath.Join(temp, "claude", "projects", "p", "shell.jsonl"),
+		`{"type":"ai-title","sessionId":"shell","aiTitle":"Looks like a real session"}`+"\n"+
+			`{"type":"agent-name","sessionId":"shell","agentName":"claude"}`+"\n")
+
+	sessions, _ := discover(options{})
+	if len(sessions) != 0 {
+		t.Fatalf("got %#v, want no sessions", sessions)
+	}
+}
+
 // Claude Code writes a caveat and a command block whenever a slash command runs.
 // Opening a session that way used to title it with the caveat, which is identical
 // in every transcript, so unrelated conversations shared one meaningless title.

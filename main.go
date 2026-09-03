@@ -428,6 +428,10 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 	}
 	defer file.Close()
 	result := session{Provider: "claude", Path: path, Updated: info.ModTime()}
+	// Typing /clear starts a fresh transcript, so switching away right afterwards
+	// leaves a file holding nothing but the bookkeeping for that command. Such a
+	// session has nothing to resume and no title to show, so it is not reported.
+	spoken := false
 	transcriptLines(file, func(line []byte) {
 		var event claudeEvent
 		if json.Unmarshal(line, &event) != nil {
@@ -437,6 +441,7 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 		result.CWD = firstNonEmpty(result.CWD, event.CWD)
 		if event.Summary != "" {
 			result.Title = oneLine(event.Summary, 100)
+			spoken = true
 		}
 		if parsed := parseTime(event.Timestamp); parsed.After(result.Updated) {
 			result.Updated = parsed
@@ -448,7 +453,14 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 			}
 			if json.Unmarshal(event.Message, &message) == nil && (message.Role == "user" || message.Role == "assistant") {
 				text := contentText(message.Content)
-				result.SearchText = appendSearchText(result.SearchText, text)
+				// A slash command that invokes a skill can leave the assistant as the
+				// only speaker, so assistant output counts as content on its own.
+				if strings.TrimSpace(text) != "" && (message.Role == "assistant" || !localCommand(text)) {
+					spoken = true
+				}
+				if !strings.HasPrefix(strings.TrimSpace(text), commandCaveat) {
+					result.SearchText = appendSearchText(result.SearchText, text)
+				}
 				if result.Title == "" && message.Role == "user" && usableTitle(text) {
 					result.Title = oneLine(text, 100)
 				}
@@ -458,7 +470,7 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 	if result.ID == "" {
 		result.ID = idFromFilename(path)
 	}
-	return result, result.ID != ""
+	return result, result.ID != "" && spoken
 }
 
 func appendSearchText(existing, text string) string {
@@ -543,7 +555,32 @@ func contentText(raw json.RawMessage) string {
 
 func usableTitle(value string) bool {
 	value = strings.TrimSpace(value)
-	return value != "" && !strings.HasPrefix(value, "<environment_context>") && !strings.HasPrefix(value, "# AGENTS.md")
+	return value != "" && !strings.HasPrefix(value, "<environment_context>") &&
+		!strings.HasPrefix(value, "# AGENTS.md") && !localCommand(value)
+}
+
+// Claude Code records bookkeeping messages whenever a slash command runs. The
+// caveat is byte-identical in every transcript, so it says nothing about a
+// session and made a title that several sessions shared; the other wrappers name
+// the command, which is worth searching for even though it reads poorly as a
+// title.
+const commandCaveat = "<local-command-caveat>"
+
+var commandWrappers = []string{
+	commandCaveat, "<command-name>", "<command-message>",
+	"<command-args>", "<local-command-stdout>",
+}
+
+// localCommand reports whether a message is slash-command bookkeeping rather
+// than something a person or the assistant said.
+func localCommand(value string) bool {
+	value = strings.TrimSpace(value)
+	for _, prefix := range commandWrappers {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func idFromFilename(path string) string {

@@ -404,3 +404,66 @@ func TestDiscoveredSessionsAlwaysHaveADate(t *testing.T) {
 		t.Fatalf("row has a blank date: %q", displayLine(sessions[0]))
 	}
 }
+
+// fzf consumes the ANSI conceal attribute without emitting it, so the searchable
+// transcript text must be hidden by padding it past the terminal width instead.
+func TestPickerLineHidesSearchTextWithoutAnsi(t *testing.T) {
+	row := "* claude 2026-09-03  recall-dev  Testing recall  ~/recall"
+	line := pickerLine(0, row, "provider id transcript words", 120)
+	if strings.Contains(line, "\x1b") {
+		t.Fatalf("picker line must not rely on ANSI escapes: %q", line)
+	}
+	index, rest, found := strings.Cut(strings.TrimSuffix(line, "\n"), "\t")
+	if !found || index != "0" {
+		t.Fatalf("index field is missing from %q", line)
+	}
+	if !strings.HasPrefix(rest, row) {
+		t.Fatalf("visible row is not at the start of the displayed field: %q", rest)
+	}
+	// Everything a terminal of this width can show must be the row and padding.
+	if visible := []rune(rest)[:120]; strings.TrimSpace(string(visible)) != row {
+		t.Fatalf("transcript text is visible within the first 120 columns: %q", string(visible))
+	}
+	if !strings.Contains(rest, "transcript words") {
+		t.Fatalf("transcript text was dropped and would not be searchable: %q", rest)
+	}
+}
+
+func TestPickerLineAlwaysSeparatesRowFromSearchText(t *testing.T) {
+	// A row longer than the width must still not run into the search text.
+	line := pickerLine(7, strings.Repeat("x", 200), "SEARCHABLE", 40)
+	rest := strings.SplitN(strings.TrimSuffix(line, "\n"), "\t", 2)[1]
+	if !strings.Contains(rest, " SEARCHABLE") {
+		t.Fatalf("row and search text were joined without a separator: %q", rest)
+	}
+}
+
+func TestPickerWidthExceedsTerminal(t *testing.T) {
+	if got := pickerWidth(); got <= 0 {
+		t.Fatalf("pickerWidth = %d, want a positive column count", got)
+	}
+	if columns := terminalColumns(); columns > 0 && pickerWidth() <= columns {
+		t.Fatalf("pickerWidth %d must exceed the terminal width %d", pickerWidth(), columns)
+	}
+}
+
+// The search text shares a field with the visible row, so escapes and tabs from a
+// transcript must not survive into it.
+func TestPickerTextStripsControlCharacters(t *testing.T) {
+	item := session{
+		Provider: "claude", ID: "abc", Title: "red \x1b[31mtitle\x1b[0m",
+		SearchText: "line one\tline two\nline three",
+	}
+	got := pickerText(item)
+	if strings.ContainsRune(got, '\x1b') {
+		t.Errorf("escape sequence survived: %q", got)
+	}
+	if strings.ContainsAny(got, "\t\n") {
+		t.Errorf("tab or newline survived and would break the field layout: %q", got)
+	}
+	for _, want := range []string{"claude", "abc", "title", "line one", "line three"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("searchable text lost %q: %q", want, got)
+		}
+	}
+}

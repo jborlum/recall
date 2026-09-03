@@ -16,9 +16,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
-var version = "0.8.0"
+var version = "0.8.1"
 
 type session struct {
 	Provider   string
@@ -869,10 +870,53 @@ func padRight(value string, width int) string {
 	return value
 }
 
+// fallbackPickerWidth is used when the terminal size is unavailable, and
+// pickerWidthMargin absorbs a window being widened while the picker is open.
+const (
+	fallbackPickerWidth = 240
+	pickerWidthMargin   = 80
+)
+
+func pickerWidth() int {
+	columns := terminalColumns()
+	if columns <= 0 {
+		columns = fallbackPickerWidth
+	}
+	return columns + pickerWidthMargin
+}
+
+// pickerLine builds one fzf input line. Field 1 carries the row index so the
+// selection can be mapped back to a session; field 2 holds the visible row
+// followed by the searchable transcript text, padded out past the terminal width
+// so fzf truncates the transcript out of view.
+//
+// fzf cannot display one field while searching another: --with-nth rewrites the
+// line before --nth is applied, so searchable text has to live inside the
+// displayed field. An earlier version relied on the ANSI conceal attribute
+// instead, which fzf consumes without emitting, leaving the transcript on screen.
+func pickerLine(index int, row, searchText string, width int) string {
+	padding := width - len([]rune(row))
+	if padding < 1 {
+		padding = 1
+	}
+	return fmt.Sprintf("%d\t%s%s%s\n", index, row, strings.Repeat(" ", padding), searchText)
+}
+
+// pickerText is the text fzf searches. Fields collapses every run of whitespace,
+// which also removes the tabs that separate the picker's own fields. Control
+// characters are dropped as well: this text shares a field with the visible row,
+// so an escape sequence surviving from a transcript could colour or corrupt it.
 func pickerText(item session) string {
-	return strings.Join(strings.Fields(strings.Join([]string{
+	joined := strings.Join([]string{
 		item.Provider, item.ID, item.Title, item.CWD, item.Label, item.Note, item.SearchText,
-	}, " ")), " ")
+	}, " ")
+	printable := strings.Map(func(char rune) rune {
+		if unicode.IsControl(char) && !unicode.IsSpace(char) {
+			return -1
+		}
+		return char
+	}, joined)
+	return strings.Join(strings.Fields(printable), " ")
 }
 
 func oneLine(value string, limit int) string {
@@ -924,12 +968,20 @@ func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt 
 		return session{}, actionOpen, errors.New("fzf is required")
 	}
 	var input strings.Builder
+	width := pickerWidth()
 	for index, item := range candidates {
-		// Keep the transcript searchable without adding it to the visible row.
-		fmt.Fprintf(&input, "%d\t\x1b[8m%s\x1b[0m\t%s\n", index, pickerText(item), render(item))
+		input.WriteString(pickerLine(index, render(item), pickerText(item), width))
 	}
 	var selected bytes.Buffer
-	arguments := []string{"--ansi", "--delimiter=\\t", "--nth=2,3", "--prompt=" + prompt, "--height=80%", "--reverse"}
+	// --with-nth=2 displays only the second field. --nth must not be set alongside
+	// it: fzf applies --with-nth first and then indexes --nth into the result, so
+	// any --nth here would search fields that no longer exist and match nothing.
+	// Every row is padded past the terminal width on purpose, so fzf's truncation
+	// marker would show on all of them and mean nothing.
+	arguments := []string{
+		"--ansi", "--delimiter=\\t", "--with-nth=2", "--ellipsis=",
+		"--prompt=" + prompt, "--height=80%", "--reverse",
+	}
 	if allowDelete {
 		arguments = append(arguments, "--expect=enter,ctrl-f,ctrl-d", "--header=Enter: resume   Ctrl-F: fork   Ctrl-D: delete   Esc: close")
 	} else if allowFork {

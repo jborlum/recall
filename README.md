@@ -25,6 +25,8 @@ not searched.
 - The `codex` and/or `claude` CLI.
 - [`fzf`](https://github.com/junegunn/fzf).
 - Go 1.23 or newer to build from source.
+- [Hammerspoon](https://www.hammerspoon.org/) when using global hotkeys on
+  macOS.
 
 ## Install
 
@@ -60,6 +62,27 @@ mise install
 mise exec -- go test ./...
 mise exec -- env CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o recall .
 ```
+
+### macOS
+
+Install the current development version with Homebrew from a clone:
+
+```sh
+git clone git@github.com:jborlum/recall.git
+cd recall
+brew install --HEAD ./Formula/recall.rb
+```
+
+For global hotkeys, install Hammerspoon and then configure recall:
+
+```sh
+brew install --cask hammerspoon
+recall setup-macos
+```
+
+Grant Hammerspoon the requested Accessibility and Terminal automation
+permissions. If its `hs` command is not installed, reload the Hammerspoon
+config from its menu after setup.
 
 ## Usage
 
@@ -109,6 +132,19 @@ run more than once. Inspect or remove the integration with:
 ```sh
 recall setup-omarchy status
 recall setup-omarchy remove
+```
+
+On macOS, `recall setup-macos` manages equivalent Hammerspoon bindings:
+
+- `COMMAND+OPTION+B` bookmarks the active session.
+- `COMMAND+OPTION+R` opens the bookmark manager.
+- `COMMAND+OPTION+L` opens the normal session picker.
+
+The commands open in Terminal.app. Manage the bindings with:
+
+```sh
+recall setup-macos status
+recall setup-macos remove
 ```
 
 ## Storage and privacy

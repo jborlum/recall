@@ -1,3 +1,5 @@
+//go:build linux
+
 package main
 
 import (
@@ -9,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 const (
@@ -19,6 +20,16 @@ const (
 	managerKey  = "SUPER + ALT + R"
 	searchKey   = "SUPER + ALT + L"
 )
+
+func isPlatformSetupCommand(value string) bool { return value == "setup-omarchy" }
+
+func runPlatformSetup(args []string, out, errOut io.Writer) int {
+	return runSetupOmarchy(args, out, errOut)
+}
+
+func platformSetupUsage() string {
+	return "  recall setup-omarchy [status|remove]\n                                    manage Omarchy global hotkeys\n"
+}
 
 type bindingState struct {
 	bookmark bool
@@ -218,13 +229,6 @@ func inspectBindings(contents string) bindingState {
 	return state
 }
 
-func setupWord(configured bool) string {
-	if configured {
-		return "configured"
-	}
-	return "missing"
-}
-
 func appendManagedBindings(data []byte, binary string, state bindingState) []byte {
 	result := strings.TrimRight(string(data), "\n") + "\n\n" + setupBegin + "\n"
 	if !state.bookmark {
@@ -328,50 +332,6 @@ func isRecallManagerBinding(call string) bool {
 
 func isRecallSearchBinding(call string) bool {
 	return strings.Contains(call, "Recall session picker")
-}
-
-func replaceBindings(path string, previous, updated []byte, mode os.FileMode) (string, error) {
-	backup := path + ".bak.recall-" + time.Now().Format("20060102-150405.000000000")
-	file, err := os.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
-	if err != nil {
-		return "", err
-	}
-	if _, err := file.Write(previous); err != nil {
-		file.Close()
-		return "", err
-	}
-	if err := file.Close(); err != nil {
-		return "", err
-	}
-	if err := atomicWrite(path, updated, mode); err != nil {
-		return "", err
-	}
-	return backup, nil
-}
-
-func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".recall-bindings-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
-		return err
-	}
-	if _, err := temporary.Write(data); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporaryPath, path)
 }
 
 func systemHotkeyConflict(local bindingState) string {

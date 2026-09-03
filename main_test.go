@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -138,6 +139,9 @@ func TestDetectActiveSessionFromEnvironment(t *testing.T) {
 }
 
 func TestDetectActiveSessionFromProcessCWD(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("uses a synthetic Linux /proc tree")
+	}
 	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("CODEX_SESSION_ID", "")
 	t.Setenv("CLAUDE_SESSION_ID", "")
@@ -162,6 +166,9 @@ func TestDetectActiveSessionFromProcessCWD(t *testing.T) {
 }
 
 func TestDetectsMultipleProcessesInTheSameDirectory(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("uses a synthetic Linux /proc tree")
+	}
 	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("CODEX_SESSION_ID", "")
 	t.Setenv("CLAUDE_SESSION_ID", "")

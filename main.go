@@ -95,8 +95,8 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		usage(out)
 		return 0
 	}
-	if command == "setup-omarchy" {
-		return runSetupOmarchy(rest, out, errOut)
+	if isPlatformSetupCommand(command) {
+		return runPlatformSetup(rest, out, errOut)
 	}
 	if command == "bookmark" {
 		if len(rest) == 0 {
@@ -225,7 +225,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, `recall - find and reopen local Codex and Claude conversations
+	fmt.Fprint(w, `recall - find and reopen local Codex and Claude conversations
 
 Usage:
   recall [flags] [QUERY]           search, select, and resume
@@ -237,8 +237,11 @@ Usage:
   recall [flags] bookmark list      print bookmarks
   recall bookmark remove NAME       remove a bookmark only
   recall [flags] doctor            report discovery and stale bookmarks
-  recall setup-omarchy [status|remove]
-                                    manage Omarchy global hotkeys
+`)
+	if setupUsage := platformSetupUsage(); setupUsage != "" {
+		fmt.Fprint(w, setupUsage)
+	}
+	fmt.Fprint(w, `
 
 Flags:
   --provider codex|claude
@@ -250,10 +253,10 @@ Flags:
 
 func isCommand(value string) bool {
 	switch value {
-	case "bookmark", "doctor", "setup-omarchy", "help":
+	case "bookmark", "doctor", "help":
 		return true
 	default:
-		return false
+		return isPlatformSetupCommand(value)
 	}
 }
 

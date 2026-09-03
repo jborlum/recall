@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -170,67 +169,22 @@ func detectActiveSessions(sessions []session) []session {
 			active[index] = true
 		}
 	}
+	detectPlatformActiveSessions(sessions, byID, byPath, active)
 
-	procRoot := os.Getenv("RECALL_PROC_ROOT")
-	if procRoot == "" {
-		procRoot = "/proc"
+	result := make([]session, 0, len(active))
+	for index := range active {
+		result = append(result, sessions[index])
 	}
-	entries, _ := os.ReadDir(procRoot)
-	fallbacks := map[string]int{}
-	for _, entry := range entries {
-		if !entry.IsDir() || !numeric(entry.Name()) {
-			continue
-		}
-		processRoot := filepath.Join(procRoot, entry.Name())
-		matched := false
-		if data, err := os.ReadFile(filepath.Join(processRoot, "environ")); err == nil {
-			for _, field := range strings.Split(string(data), "\x00") {
-				pair := strings.SplitN(field, "=", 2)
-				if len(pair) != 2 {
-					continue
-				}
-				provider := ""
-				switch pair[0] {
-				case "CODEX_THREAD_ID", "CODEX_SESSION_ID":
-					provider = "codex"
-				case "CLAUDE_SESSION_ID":
-					provider = "claude"
-				}
-				if index, ok := byID[provider+"\x00"+pair[1]]; ok && provider != "" {
-					active[index], matched = true, true
-				}
-			}
-		}
+	sort.Slice(result, func(i, j int) bool { return result[i].Updated.After(result[j].Updated) })
+	return result
+}
 
-		provider := processProvider(processRoot)
-		if provider == "" {
-			continue
-		}
-		if descriptors, err := os.ReadDir(filepath.Join(processRoot, "fd")); err == nil {
-			for _, descriptor := range descriptors {
-				target, err := os.Readlink(filepath.Join(processRoot, "fd", descriptor.Name()))
-				if err != nil {
-					continue
-				}
-				if resolved, err := filepath.EvalSymlinks(target); err == nil {
-					target = resolved
-				}
-				if index, ok := byPath[filepath.Clean(target)]; ok {
-					active[index], matched = true, true
-				}
-			}
-		}
-		if matched {
-			continue
-		}
-		cwd, err := os.Readlink(filepath.Join(processRoot, "cwd"))
-		if err != nil {
-			continue
-		}
-		fallbacks[provider+"\x00"+cwd]++
-	}
+func applyActiveFallbacks(sessions []session, fallbacks map[string]int, active map[int]bool) {
 	for key, count := range fallbacks {
 		parts := strings.SplitN(key, "\x00", 2)
+		if len(parts) != 2 {
+			continue
+		}
 		var candidates []int
 		for index, item := range sessions {
 			if item.Provider == parts[0] && !item.Archived && samePath(item.CWD, parts[1]) {
@@ -247,50 +201,17 @@ func detectActiveSessions(sessions []session) []session {
 			active[index] = true
 		}
 	}
-
-	result := make([]session, 0, len(active))
-	for index := range active {
-		result = append(result, sessions[index])
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Updated.After(result[j].Updated) })
-	return result
 }
 
-func numeric(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, char := range value {
-		if char < '0' || char > '9' {
-			return false
+func commandProvider(command string) string {
+	command = strings.ToLower(strings.TrimSpace(command))
+	for _, argument := range strings.Fields(command) {
+		base := filepath.Base(argument)
+		if base == "codex" || strings.HasPrefix(base, "codex-") || strings.Contains(argument, "/@openai/codex/") {
+			return "codex"
 		}
-	}
-	return true
-}
-
-func processProvider(root string) string {
-	data, _ := os.ReadFile(filepath.Join(root, "comm"))
-	name := strings.ToLower(strings.TrimSpace(string(data)))
-	if name == "codex" || strings.HasPrefix(name, "codex-") {
-		return "codex"
-	}
-	if name == "claude" || strings.HasPrefix(name, "claude-") {
-		return "claude"
-	}
-	if command, err := os.ReadFile(filepath.Join(root, "cmdline")); err == nil {
-		arguments := strings.Split(string(command), "\x00")
-		if len(arguments) > 2 {
-			arguments = arguments[:2]
-		}
-		for _, argument := range arguments {
-			argument = strings.ToLower(argument)
-			base := filepath.Base(argument)
-			if base == "codex" || strings.Contains(argument, "/@openai/codex/") {
-				return "codex"
-			}
-			if base == "claude" || strings.Contains(argument, "/@anthropic-ai/claude-code/") {
-				return "claude"
-			}
+		if base == "claude" || strings.HasPrefix(base, "claude-") || strings.Contains(argument, "/@anthropic-ai/claude-code/") {
+			return "claude"
 		}
 	}
 	return ""
@@ -312,7 +233,5 @@ func notify(message string) {
 	if os.Getenv("RECALL_NOTIFY") == "" {
 		return
 	}
-	if path, err := exec.LookPath("notify-send"); err == nil {
-		_ = exec.Command(path, "Recall", message).Run()
-	}
+	platformNotify(message)
 }

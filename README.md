@@ -35,9 +35,9 @@ brew tap jborlum/recall https://github.com/jborlum/recall.git
 brew install jborlum/recall/recall
 ```
 
-Homebrew requires formulae to live in a tap, so `brew install ./Formula/recall.rb`
-is rejected. Installing by full name also records the formula as trusted, which
-Homebrew requires for taps outside homebrew-core.
+Homebrew requires formulae to live in a tap, so installing the formula by path
+is rejected. Installing by full name also records it as trusted, which Homebrew
+requires for taps outside homebrew-core.
 
 Add `--HEAD` to build the current `main` instead of the latest release, and
 upgrade a `--HEAD` install with `brew upgrade --fetch-HEAD`.

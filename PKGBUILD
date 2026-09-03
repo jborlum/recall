@@ -1,5 +1,5 @@
 pkgname=recall
-pkgver=0.9.2
+pkgver=0.10.0
 pkgrel=1
 pkgdesc="Find, bookmark, and reopen local Codex and Claude conversations"
 arch=('x86_64' 'aarch64')

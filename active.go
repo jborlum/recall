@@ -35,7 +35,7 @@ func pinActive(sessions []session, bookmarks map[string]bookmark, args []string,
 			return 1
 		}
 		var err error
-		selected, _, err = pick(active, opts, false, false, "active> ", displayLine, in, errOut)
+		selected, _, err = pick(active, opts, false, false, "active> ", displayLine, errOut)
 		if err != nil {
 			if !errors.Is(err, errCancelled) {
 				fmt.Fprintf(errOut, "recall: %v\n", err)
@@ -152,7 +152,7 @@ func detectActiveSessions(sessions []session) []session {
 	byID := make(map[string]int, len(sessions)*2)
 	byPath := make(map[string]int, len(sessions))
 	for index, item := range sessions {
-		byID[item.Provider+"\x00"+item.ID] = index
+		byID[sessionKey(item.Provider, item.ID)] = index
 		if resolved, err := filepath.EvalSymlinks(item.Path); err == nil {
 			byPath[resolved] = index
 		} else {
@@ -162,7 +162,7 @@ func detectActiveSessions(sessions []session) []session {
 	active := map[int]bool{}
 	for _, name := range []string{"CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID"} {
 		value := os.Getenv(name)
-		if index, ok := byID[sessionIDVariable(name)+"\x00"+value]; ok && value != "" {
+		if index, ok := byID[sessionKey(sessionIDVariable(name), value)]; ok && value != "" {
 			active[index] = true
 		}
 	}
@@ -180,23 +180,26 @@ func detectActiveSessions(sessions []session) []session {
 // start time and the last transcript write.
 const activeFallbackSlack = 2 * time.Second
 
+// processGroup identifies the running provider processes that share a working
+// directory.
+type processGroup struct {
+	provider string
+	cwd      string
+}
+
 // applyActiveFallbacks attributes provider processes to sessions by working
 // directory. Neither provider holds its transcript open, so for Claude this is
 // the only signal available and it carries the whole feature.
 //
-// starts holds one process start time per running process in that directory.
-// Each process claims the newest transcript it could still own, so a process
-// that has not written anything yet cannot be credited with an older session
-// left behind in the same directory.
-func applyActiveFallbacks(sessions []session, fallbacks map[string][]time.Time, active map[int]bool) {
-	for key, starts := range fallbacks {
-		parts := strings.SplitN(key, "\x00", 2)
-		if len(parts) != 2 {
-			continue
-		}
+// Each group holds one start time per running process in that directory. Every
+// process claims the newest transcript it could still own, so a process that has
+// not written anything yet cannot be credited with an older session left behind
+// in the same directory.
+func applyActiveFallbacks(sessions []session, fallbacks map[processGroup][]time.Time, active map[int]bool) {
+	for group, starts := range fallbacks {
 		var candidates []int
 		for index, item := range sessions {
-			if item.Provider == parts[0] && !item.Archived && samePath(item.CWD, parts[1]) {
+			if item.Provider == group.provider && !item.Archived && samePath(item.CWD, group.cwd) {
 				candidates = append(candidates, index)
 			}
 		}

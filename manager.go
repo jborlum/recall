@@ -23,7 +23,7 @@ func manageBookmarks(sessions []session, bookmarks map[string]bookmark, opts opt
 			notify(errOut, message)
 			return 0
 		}
-		selected, action, err := pick(pinned, opts, true, true, "bookmarks> ", bookmarkRows(pinned), in, errOut)
+		selected, action, err := pick(pinned, opts, true, true, "bookmarks> ", bookmarkRows(pinned), errOut)
 		if err != nil {
 			if errors.Is(err, errCancelled) {
 				return 130

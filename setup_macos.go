@@ -29,10 +29,10 @@ const (
 // window running shell.
 var macTerminals = map[string]func(shell string) string{
 	"terminal": func(shell string) string {
-		return luaAppleScript("tell application \"Terminal\"\nactivate\ndo script " + macAppleScriptQuote(shell) + "\nend tell")
+		return luaAppleScript("tell application \"Terminal\"\nactivate\ndo script " + appleScriptQuote(shell) + "\nend tell")
 	},
 	"iterm": func(shell string) string {
-		return luaAppleScript("tell application \"iTerm\"\nactivate\ncreate window with default profile command " + macAppleScriptQuote(shell) + "\nend tell")
+		return luaAppleScript("tell application \"iTerm\"\nactivate\ncreate window with default profile command " + appleScriptQuote(shell) + "\nend tell")
 	},
 	"ghostty": func(shell string) string {
 		// Ghostty refuses to launch the emulator from its own CLI on macOS, so the
@@ -61,7 +61,8 @@ func runPlatformSetup(args []string, out, errOut io.Writer) int {
 }
 
 func platformSetupUsage() string {
-	return "  recall setup [--terminal NAME] [status|remove]\n                                    manage macOS global hotkeys\n"
+	return "  recall setup [--terminal NAME]    install macOS global hotkeys\n" +
+		"  recall setup [status|remove]      inspect or remove them\n"
 }
 
 func runSetupMacOS(args []string, out, errOut io.Writer) int {
@@ -318,24 +319,6 @@ end)
 	return []byte(base + block)
 }
 
-func removeMarkedBlock(data []byte, beginMarker, endMarker string) []byte {
-	contents := string(data)
-	begin := strings.Index(contents, beginMarker)
-	if begin < 0 {
-		return data
-	}
-	endRelative := strings.Index(contents[begin:], endMarker)
-	if endRelative < 0 {
-		return data
-	}
-	end := begin + endRelative + len(endMarker)
-	if end < len(contents) && contents[end] == '\n' {
-		end++
-	}
-	contents = strings.TrimRight(contents[:begin], "\n") + "\n" + strings.TrimLeft(contents[end:], "\n")
-	return []byte(contents)
-}
-
 func hammerspoonConflict(contents string) string {
 	for _, key := range []string{"B", "R", "L"} {
 		pattern := `(?is)hs\.hotkey\.bind\s*\(\s*\{([^}]*)\}\s*,\s*["']` + key + `["']`
@@ -349,12 +332,6 @@ func hammerspoonConflict(contents string) string {
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
-
-func macAppleScriptQuote(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"`, `\"`)
-	return `"` + value + `"`
 }
 
 func reloadHammerspoon() bool {

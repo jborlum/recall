@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -144,15 +143,15 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		return 0
 	}
 
+	if opts.print && command != "open" {
+		fmt.Fprintln(errOut, "recall: --print cannot be combined with a command")
+		return 2
+	}
 	sessions, warnings := discover(opts)
 	for _, warning := range warnings {
 		fmt.Fprintf(errOut, "recall: warning: %v\n", warning)
 	}
 	applyBookmarks(sessions, bookmarks)
-	if opts.print && command != "open" {
-		fmt.Fprintln(errOut, "recall: --print cannot be combined with a command")
-		return 2
-	}
 
 	switch command {
 	case "doctor":
@@ -185,7 +184,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	}
 
 	query := strings.TrimSpace(strings.Join(queryArgs, " "))
-	matches := filterAndRank(sessions, bookmarks, query)
+	matches := filterAndRank(sessions, query)
 	if len(matches) == 0 {
 		fmt.Fprintln(errOut, "recall: no matching sessions")
 		return 1
@@ -195,7 +194,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		return 0
 	}
 
-	selected, action, err := pick(matches, opts, command != "pin", false, "recall> ", displayLine, in, errOut)
+	selected, action, err := pick(matches, opts, command != "pin", false, "recall> ", displayLine, errOut)
 	if err != nil {
 		if !errors.Is(err, errCancelled) {
 			fmt.Fprintf(errOut, "recall: %v\n", err)
@@ -204,10 +203,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		return 130
 	}
 	if command == "pin" {
-		bookmarks[label] = bookmark{
-			Provider: selected.Provider, SessionID: selected.ID, CreatedAt: time.Now().UTC(),
-			CachedTitle: selected.Title, CachedCWD: selected.CWD,
-		}
+		bookmarks[label] = newBookmark(selected)
 		if err := saveBookmarks(bookmarks); err != nil {
 			fmt.Fprintf(errOut, "recall: save bookmarks: %v\n", err)
 			return 1
@@ -229,27 +225,25 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `recall - find and reopen local Codex and Claude conversations
 
 Usage:
-  recall [flags] [QUERY]           search, select, and resume
-  recall [flags] bookmark          resume, fork, or delete bookmarks
-  recall [flags] bookmark add NAME [QUERY]
-                                    bookmark a selected session
-  recall [flags] bookmark active [NAME]
-                                    bookmark the active session
-  recall [flags] bookmark list      print bookmarks
+  recall [QUERY]                    search, select, and resume
+  recall bookmark                   resume, fork, or delete bookmarks
+  recall bookmark add NAME [QUERY]  bookmark a matching session
+  recall bookmark active [NAME]     bookmark the active session
+  recall bookmark list              print bookmarks
   recall bookmark remove NAME       remove a bookmark only
-  recall [flags] doctor            report discovery and stale bookmarks
+  recall doctor                     report discovery and stale bookmarks
 `)
-	if setupUsage := platformSetupUsage(); setupUsage != "" {
-		fmt.Fprint(w, setupUsage)
-	}
+	fmt.Fprint(w, platformSetupUsage())
 	fmt.Fprint(w, `
-
 Flags:
-  --provider codex|claude
-  --cwd DIR
-  --limit N
-  --print
-  --version`)
+  --provider codex|claude           only show one provider
+  --cwd DIR                         only show sessions under DIR
+  --limit N                         maximum results (default 50)
+  --print                           print results instead of opening one
+  --version                         print the version
+
+In the picker: Enter resumes, Ctrl-F forks, Esc closes.
+`)
 }
 
 func isCommand(value string) bool {
@@ -389,11 +383,10 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 	}
 	defer file.Close()
 	result := session{Provider: "codex", Path: path, Updated: info.ModTime(), Archived: archived}
-	scanner := newScanner(file)
-	for scanner.Scan() {
+	transcriptLines(file, func(line []byte) {
 		var event codexEnvelope
-		if json.Unmarshal(scanner.Bytes(), &event) != nil {
-			continue
+		if json.Unmarshal(line, &event) != nil {
+			return
 		}
 		if event.Type == "session_meta" {
 			result.ID = firstNonEmpty(event.Payload.ID, event.Payload.SessionID)
@@ -412,7 +405,7 @@ func parseCodex(path string, info fs.FileInfo, archived bool) (session, bool) {
 				}
 			}
 		}
-	}
+	})
 	if result.ID == "" {
 		result.ID = idFromFilename(path)
 	}
@@ -435,11 +428,10 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 	}
 	defer file.Close()
 	result := session{Provider: "claude", Path: path, Updated: info.ModTime()}
-	scanner := newScanner(file)
-	for scanner.Scan() {
+	transcriptLines(file, func(line []byte) {
 		var event claudeEvent
-		if json.Unmarshal(scanner.Bytes(), &event) != nil {
-			continue
+		if json.Unmarshal(line, &event) != nil {
+			return
 		}
 		result.ID = firstNonEmpty(result.ID, event.SessionID)
 		result.CWD = firstNonEmpty(result.CWD, event.CWD)
@@ -462,7 +454,7 @@ func parseClaude(path string, info fs.FileInfo) (session, bool) {
 				}
 			}
 		}
-	}
+	})
 	if result.ID == "" {
 		result.ID = idFromFilename(path)
 	}
@@ -480,10 +472,47 @@ func appendSearchText(existing, text string) string {
 	return existing + text
 }
 
-func newScanner(reader io.Reader) *bufio.Scanner {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024*1024)
-	return scanner
+// maxTranscriptRecord bounds how much of a single JSONL record is parsed.
+// Providers occasionally emit one enormous record — a base64 payload or a
+// runaway tool result — and a real transcript here held a 1.4 GB line beside
+// 314 ordinary ones.
+const maxTranscriptRecord = 1 << 20
+
+// transcriptLines calls fn for each JSONL record in reader, skipping any record
+// longer than maxTranscriptRecord so the rest of the file stays searchable. A
+// bufio.Scanner cannot do this: an over-long token ends the scan for good, which
+// silently truncated the transcript above to its first 51 lines.
+//
+// The slice handed to fn points into the read buffer and is only valid until fn
+// returns, which suits json.Unmarshal because it copies out what it keeps.
+func transcriptLines(reader io.Reader, fn func(line []byte)) {
+	buffered := bufio.NewReaderSize(reader, maxTranscriptRecord)
+	for {
+		line, err := buffered.ReadSlice('\n')
+		switch err {
+		case nil:
+			fn(line)
+		case bufio.ErrBufferFull:
+			if !discardRecord(buffered) {
+				return
+			}
+		default:
+			if len(line) > 0 {
+				fn(line)
+			}
+			return
+		}
+	}
+}
+
+// discardRecord reads past the remainder of an over-long record, reporting
+// whether another record follows.
+func discardRecord(buffered *bufio.Reader) bool {
+	for {
+		if _, err := buffered.ReadSlice('\n'); err != bufio.ErrBufferFull {
+			return err == nil
+		}
+	}
 }
 
 func contentText(raw json.RawMessage) string {
@@ -542,11 +571,15 @@ func parseTime(value string) time.Time {
 	return parsed
 }
 
+// sessionKey identifies a session. The providers number their sessions
+// independently, so an id is only unique within one provider.
+func sessionKey(provider, id string) string { return provider + "\x00" + id }
+
 func dedupe(items []session) []session {
 	seen := map[string]int{}
 	result := make([]session, 0, len(items))
 	for _, item := range items {
-		key := item.Provider + "\x00" + item.ID
+		key := sessionKey(item.Provider, item.ID)
 		if index, ok := seen[key]; ok {
 			if item.Updated.After(result[index].Updated) {
 				result[index] = item
@@ -571,25 +604,27 @@ func pathWithin(path, root string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// applyBookmarks labels each session that a bookmark points at. Two bookmarks
+// may name the same session, and the first label in sorted order wins so the
+// listing is stable.
 func applyBookmarks(sessions []session, bookmarks map[string]bookmark) {
-	labels := make([]string, 0, len(bookmarks))
-	for label := range bookmarks {
-		labels = append(labels, label)
+	type marker struct{ label, note string }
+	byKey := make(map[string]marker, len(bookmarks))
+	for label, pin := range bookmarks {
+		key := sessionKey(pin.Provider, pin.SessionID)
+		if existing, ok := byKey[key]; ok && existing.label <= label {
+			continue
+		}
+		byKey[key] = marker{label, pin.Note}
 	}
-	sort.Strings(labels)
 	for index := range sessions {
-		for _, label := range labels {
-			item := bookmarks[label]
-			if item.Provider == sessions[index].Provider && item.SessionID == sessions[index].ID {
-				sessions[index].Label = label
-				sessions[index].Note = item.Note
-				break
-			}
+		if found, ok := byKey[sessionKey(sessions[index].Provider, sessions[index].ID)]; ok {
+			sessions[index].Label, sessions[index].Note = found.label, found.note
 		}
 	}
 }
 
-func filterAndRank(sessions []session, bookmarks map[string]bookmark, query string) []session {
+func filterAndRank(sessions []session, query string) []session {
 	tokens := strings.Fields(strings.ToLower(query))
 	result := make([]session, 0, len(sessions))
 	for _, item := range sessions {
@@ -724,7 +759,7 @@ func saveBookmarks(bookmarks map[string]bookmark) error {
 func pinnedSessions(sessions []session, bookmarks map[string]bookmark) []session {
 	byKey := make(map[string]session, len(sessions))
 	for _, item := range sessions {
-		byKey[item.Provider+"\x00"+item.ID] = item
+		byKey[sessionKey(item.Provider, item.ID)] = item
 	}
 	labels := make([]string, 0, len(bookmarks))
 	for label := range bookmarks {
@@ -734,7 +769,7 @@ func pinnedSessions(sessions []session, bookmarks map[string]bookmark) []session
 	result := make([]session, 0, len(labels))
 	for _, label := range labels {
 		pin := bookmarks[label]
-		item, ok := byKey[pin.Provider+"\x00"+pin.SessionID]
+		item, ok := byKey[sessionKey(pin.Provider, pin.SessionID)]
 		if !ok {
 			// The transcript is gone, so fall back to what the bookmark itself
 			// recorded. Its creation date is the only date left for the row, and it
@@ -756,11 +791,11 @@ func doctor(sessions []session, bookmarks map[string]bookmark, out io.Writer) in
 	known := map[string]bool{}
 	for _, item := range sessions {
 		counts[item.Provider]++
-		known[item.Provider+"\x00"+item.ID] = true
+		known[sessionKey(item.Provider, item.ID)] = true
 	}
 	stale := 0
 	for label, pin := range bookmarks {
-		if !known[pin.Provider+"\x00"+pin.SessionID] {
+		if !known[sessionKey(pin.Provider, pin.SessionID)] {
 			fmt.Fprintf(out, "stale bookmark: %s -> %s:%s\n", label, pin.Provider, pin.SessionID)
 			stale++
 		}
@@ -812,29 +847,39 @@ func printSessions(out io.Writer, sessions []session, limit int, render rowRende
 	}
 }
 
+// formatRow wraps the columns every view shares around a middle section of
+// exactly rowWidth, which is what keeps the working directory in the same place
+// whichever renderer produced the row.
+func formatRow(item session, middle string) string {
+	return fmt.Sprintf("%s %-6s %s  %s  %s%s", rowMark(item), item.Provider, rowDate(item),
+		middle, shortHome(item.CWD), rowStatus(item))
+}
+
+// column truncates and pads a value to exactly width runes.
+func column(value string, width int) string {
+	return padRight(oneLine(value, width), width)
+}
+
 func displayLine(item session) string {
-	title := item.Title
-	if title == "" {
-		title = "(untitled)"
-	}
+	title := sessionTitle(item)
 	if item.Label != "" {
 		title = item.Label + " — " + title
 	}
 	// Truncate after the label is attached, or a bookmarked row overflows the
 	// column and shifts the working directory out of line with every other row.
-	return fmt.Sprintf("%s %-6s %s  %s  %s%s", rowMark(item), item.Provider, rowDate(item),
-		padRight(oneLine(title, rowWidth), rowWidth), shortHome(item.CWD), rowStatus(item))
+	return formatRow(item, column(title, rowWidth))
 }
 
 func displayBookmarkLine(item session, labelWidth int) string {
 	titleWidth := rowWidth - labelWidth - 2
-	title := item.Title
-	if title == "" {
-		title = "(untitled)"
+	return formatRow(item, column(item.Label, labelWidth)+"  "+column(sessionTitle(item), titleWidth))
+}
+
+func sessionTitle(item session) string {
+	if item.Title == "" {
+		return "(untitled)"
 	}
-	return fmt.Sprintf("%s %-6s %s  %s  %s  %s%s", rowMark(item), item.Provider, rowDate(item),
-		padRight(oneLine(item.Label, labelWidth), labelWidth),
-		padRight(oneLine(title, titleWidth), titleWidth), shortHome(item.CWD), rowStatus(item))
+	return item.Title
 }
 
 func rowMark(item session) string {
@@ -957,7 +1002,9 @@ func terminalIO(in io.Reader, out io.Writer) bool {
 	return inErr == nil && outErr == nil && inInfo.Mode()&os.ModeCharDevice != 0 && outInfo.Mode()&os.ModeCharDevice != 0
 }
 
-func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt string, render rowRenderer, in io.Reader, errOut io.Writer) (session, selectionAction, error) {
+// pick runs fzf over the given sessions. fzf reads the list from its stdin and
+// the keyboard straight from the terminal, so no input reader is needed here.
+func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt string, render rowRenderer, errOut io.Writer) (session, selectionAction, error) {
 	limit := opts.limit
 	if len(sessions) < limit {
 		limit = len(sessions)
@@ -994,14 +1041,9 @@ func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt 
 	if err := cmd.Run(); err != nil {
 		return session{}, actionOpen, errCancelled
 	}
-	index := 0
-	action := actionOpen
-	if allowFork || allowDelete {
-		index, action, err = parseSelection(selected.String())
-	} else {
-		field := strings.SplitN(strings.TrimSpace(selected.String()), "\t", 2)[0]
-		index, err = strconv.Atoi(field)
-	}
+	// Without --expect fzf prints only the accepted row, which parseSelection
+	// reads as an open action.
+	index, action, err := parseSelection(selected.String())
 	if err != nil || index < 0 || index >= len(candidates) {
 		return session{}, actionOpen, errors.New("invalid picker result")
 	}

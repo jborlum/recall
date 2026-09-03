@@ -45,8 +45,8 @@ func TestApplyActiveFallbacksPrefersNewestOwnableTranscript(t *testing.T) {
 		{Provider: "codex", ID: "wrong-provider", CWD: "/work", Updated: now},
 	}
 	active := map[int]bool{}
-	applyActiveFallbacks(sessions, map[string][]time.Time{
-		"claude\x00/work": {now.Add(-10 * time.Minute)},
+	applyActiveFallbacks(sessions, map[processGroup][]time.Time{
+		{"claude", "/work"}: {now.Add(-10 * time.Minute)},
 	}, active)
 	if len(active) != 1 || !active[1] {
 		t.Fatalf("active = %v, want only the live session in /work", active)
@@ -57,8 +57,8 @@ func TestApplyActiveFallbacksSkipsTranscriptsPredatingProcess(t *testing.T) {
 	now := time.Now()
 	sessions := []session{{Provider: "claude", ID: "stale", CWD: "/work", Updated: now.Add(-72 * time.Hour)}}
 	active := map[int]bool{}
-	applyActiveFallbacks(sessions, map[string][]time.Time{
-		"claude\x00/work": {now.Add(-time.Minute)},
+	applyActiveFallbacks(sessions, map[processGroup][]time.Time{
+		{"claude", "/work"}: {now.Add(-time.Minute)},
 	}, active)
 	if len(active) != 0 {
 		t.Fatalf("active = %v, want none", active)
@@ -69,8 +69,8 @@ func TestApplyActiveFallbacksWithoutStartTimeKeepsMatching(t *testing.T) {
 	now := time.Now()
 	sessions := []session{{Provider: "claude", ID: "stale", CWD: "/work", Updated: now.Add(-72 * time.Hour)}}
 	active := map[int]bool{}
-	applyActiveFallbacks(sessions, map[string][]time.Time{
-		"claude\x00/work": {{}},
+	applyActiveFallbacks(sessions, map[processGroup][]time.Time{
+		{"claude", "/work"}: {{}},
 	}, active)
 	if len(active) != 1 || !active[0] {
 		t.Fatalf("active = %v, want the session matched when no start time is known", active)
@@ -81,8 +81,8 @@ func TestApplyActiveFallbacksIgnoresArchivedSessions(t *testing.T) {
 	now := time.Now()
 	sessions := []session{{Provider: "codex", ID: "archived", CWD: "/work", Updated: now, Archived: true}}
 	active := map[int]bool{}
-	applyActiveFallbacks(sessions, map[string][]time.Time{
-		"codex\x00/work": {now.Add(-time.Minute)},
+	applyActiveFallbacks(sessions, map[processGroup][]time.Time{
+		{"codex", "/work"}: {now.Add(-time.Minute)},
 	}, active)
 	if len(active) != 0 {
 		t.Fatalf("active = %v, want none", active)

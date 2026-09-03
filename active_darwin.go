@@ -18,7 +18,7 @@ func detectPlatformActiveSessions(sessions []session, byID, byPath map[string]in
 		return
 	}
 	environments := darwinProcessEnvironments(psPath)
-	fallbacks := map[string][]time.Time{}
+	fallbacks := map[processGroup][]time.Time{}
 	now := time.Now()
 	for _, line := range strings.Split(string(output), "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
@@ -45,8 +45,8 @@ func detectPlatformActiveSessions(sessions []session, byID, byPath map[string]in
 			}
 		}
 		if !matched && cwd != "" {
-			key := provider + "\x00" + cwd
-			fallbacks[key] = append(fallbacks[key], processStart(now, fields[1]))
+			group := processGroup{provider, cwd}
+			fallbacks[group] = append(fallbacks[group], processStart(now, fields[1]))
 		}
 	}
 	applyActiveFallbacks(sessions, fallbacks, active)
@@ -75,7 +75,7 @@ func darwinProcessEnvironments(psPath string) map[string][]string {
 				continue
 			}
 			if provider := sessionIDVariable(name); provider != "" && value != "" {
-				result[fields[0]] = append(result[fields[0]], provider+"\x00"+value)
+				result[fields[0]] = append(result[fields[0]], sessionKey(provider, value))
 			}
 		}
 	}

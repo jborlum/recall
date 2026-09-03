@@ -16,7 +16,7 @@ func detectPlatformActiveSessions(sessions []session, byID, byPath map[string]in
 		procRoot = "/proc"
 	}
 	entries, _ := os.ReadDir(procRoot)
-	fallbacks := map[string][]time.Time{}
+	fallbacks := map[processGroup][]time.Time{}
 	for _, entry := range entries {
 		if !entry.IsDir() || !numeric(entry.Name()) {
 			continue
@@ -33,7 +33,7 @@ func detectPlatformActiveSessions(sessions []session, byID, byPath map[string]in
 				if provider == "" {
 					continue
 				}
-				if index, ok := byID[provider+"\x00"+value]; ok {
+				if index, ok := byID[sessionKey(provider, value)]; ok {
 					active[index], matched = true, true
 				}
 			}
@@ -62,8 +62,8 @@ func detectPlatformActiveSessions(sessions []session, byID, byPath map[string]in
 		}
 		cwd, err := os.Readlink(filepath.Join(processRoot, "cwd"))
 		if err == nil {
-			key := provider + "\x00" + cwd
-			fallbacks[key] = append(fallbacks[key], linuxProcessStart(processRoot))
+			group := processGroup{provider, cwd}
+			fallbacks[group] = append(fallbacks[group], linuxProcessStart(processRoot))
 		}
 	}
 	applyActiveFallbacks(sessions, fallbacks, active)

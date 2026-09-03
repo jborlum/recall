@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -11,6 +12,26 @@ func setupWord(configured bool) string {
 		return "configured"
 	}
 	return "missing"
+}
+
+// removeMarkedBlock cuts the region between two markers, inclusive, leaving a
+// single newline where it stood. Both platforms fence their generated bindings
+// this way so that a hand-edited config keeps everything outside the fence.
+func removeMarkedBlock(data []byte, beginMarker, endMarker string) []byte {
+	contents := string(data)
+	begin := strings.Index(contents, beginMarker)
+	if begin < 0 {
+		return data
+	}
+	endRelative := strings.Index(contents[begin:], endMarker)
+	if endRelative < 0 {
+		return data
+	}
+	end := begin + endRelative + len(endMarker)
+	if end < len(contents) && contents[end] == '\n' {
+		end++
+	}
+	return []byte(strings.TrimRight(contents[:begin], "\n") + "\n" + strings.TrimLeft(contents[end:], "\n"))
 }
 
 func replaceBindings(path string, previous, updated []byte, mode os.FileMode) (string, error) {

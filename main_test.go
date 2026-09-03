@@ -63,13 +63,26 @@ func TestSearchAndBookmarkRanking(t *testing.T) {
 	}
 	bookmarks := map[string]bookmark{"db": {Provider: "codex", SessionID: "one"}}
 	applyBookmarks(sessions, bookmarks)
-	matches := filterAndRank(sessions, bookmarks, "database")
+	matches := filterAndRank(sessions, "database")
 	if len(matches) != 1 || matches[0].ID != "one" {
 		t.Fatalf("unexpected matches: %#v", matches)
 	}
-	all := filterAndRank(sessions, bookmarks, "")
+	all := filterAndRank(sessions, "")
 	if all[0].ID != "one" {
 		t.Fatalf("pinned session was not ranked first: %#v", all)
+	}
+}
+
+// Two bookmarks may name one session. The row can only show one label, so the
+// choice has to be stable rather than depend on map iteration order.
+func TestApplyBookmarksPrefersTheFirstLabelInOrder(t *testing.T) {
+	sessions := []session{{Provider: "codex", ID: "one"}}
+	applyBookmarks(sessions, map[string]bookmark{
+		"zebra": {Provider: "codex", SessionID: "one", Note: "last"},
+		"alpha": {Provider: "codex", SessionID: "one", Note: "first"},
+	})
+	if sessions[0].Label != "alpha" || sessions[0].Note != "first" {
+		t.Fatalf("label = %q, note = %q; want alpha/first", sessions[0].Label, sessions[0].Note)
 	}
 }
 
@@ -229,9 +242,51 @@ func TestParseSelection(t *testing.T) {
 
 func TestPickerRequiresFZF(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, _, err := pick([]session{{ID: "first"}}, options{limit: 50}, true, false, "recall> ", displayLine, bytes.NewReader(nil), &bytes.Buffer{})
+	_, _, err := pick([]session{{ID: "first"}}, options{limit: 50}, true, false, "recall> ", displayLine, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "fzf is required") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+// A stub fzf exercises the selection round trip without a terminal. Real fzf
+// echoes back the input line it accepted, prefixed by the pressed key when
+// --expect is set, and pick maps that line back to a session by its index field.
+func TestPickMapsSelectionBackToItsSession(t *testing.T) {
+	sessions := []session{{Provider: "codex", ID: "first"}, {Provider: "claude", ID: "second"}}
+	cases := []struct {
+		name       string
+		allowFork  bool
+		body       string
+		wantID     string
+		wantAction selectionAction
+	}{
+		// Without --expect fzf prints only the row, which used to take a separate
+		// parsing path in pick.
+		{"accept without expect", false, `awk -F'\t' '$1==1'`, "second", actionOpen},
+		{"accept with expect", true, `printf 'enter\n'; awk -F'\t' '$1==1'`, "second", actionOpen},
+		{"fork key", true, `printf 'ctrl-f\n'; awk -F'\t' '$1==0'`, "first", actionFork},
+	}
+	for _, item := range cases {
+		t.Run(item.name, func(t *testing.T) {
+			bin := t.TempDir()
+			stub := filepath.Join(bin, "fzf")
+			writeFixture(t, stub, "#!/bin/sh\n"+item.body+"\n")
+			if err := os.Chmod(stub, 0700); err != nil {
+				t.Fatal(err)
+			}
+			// The stub shell needs the standard tools, and bin comes first so the
+			// stub still shadows any real fzf.
+			t.Setenv("PATH", bin+":/usr/bin:/bin")
+			selected, action, err := pick(sessions, options{limit: 50}, item.allowFork, false,
+				"recall> ", displayLine, &bytes.Buffer{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if selected.ID != item.wantID || action != item.wantAction {
+				t.Fatalf("selected %q action %d, want %q action %d",
+					selected.ID, action, item.wantID, item.wantAction)
+			}
+		})
 	}
 }
 
@@ -465,6 +520,43 @@ func TestPickerTextStripsControlCharacters(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("searchable text lost %q: %q", want, got)
 		}
+	}
+}
+
+// One oversized record must not cost the rest of the transcript. A real 1.4 GB
+// line here used to end the scan, silently hiding the following 260 records from
+// full-text search.
+func TestOversizedRecordDoesNotTruncateTranscript(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("HOME", temp)
+	t.Setenv("CODEX_HOME", filepath.Join(temp, "codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(temp, "claude"))
+
+	message := func(text string) string {
+		return `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"` + text + `"}]}}`
+	}
+	giant := message(strings.Repeat("x", maxTranscriptRecord+1024))
+	writeFixture(t, filepath.Join(temp, "codex", "sessions", "big.jsonl"), strings.Join([]string{
+		`{"type":"session_meta","payload":{"id":"big","cwd":"/work"}}`,
+		message("before the giant record"),
+		giant,
+		message("after the giant record"),
+	}, "\n")+"\n")
+
+	sessions, warnings := discover(options{})
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	for _, want := range []string{"before the giant record", "after the giant record"} {
+		if !strings.Contains(sessions[0].SearchText, want) {
+			t.Errorf("search text is missing %q", want)
+		}
+	}
+	if strings.Contains(sessions[0].SearchText, strings.Repeat("x", 64)) {
+		t.Error("the oversized record was parsed instead of skipped")
 	}
 }
 

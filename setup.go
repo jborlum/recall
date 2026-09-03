@@ -28,7 +28,8 @@ func runPlatformSetup(args []string, out, errOut io.Writer) int {
 }
 
 func platformSetupUsage() string {
-	return "  recall setup [status|remove]      manage Omarchy global hotkeys\n"
+	return "  recall setup                      install Omarchy global hotkeys\n" +
+		"  recall setup [status|remove]      inspect or remove them\n"
 }
 
 type bindingState struct {
@@ -297,16 +298,9 @@ func bindingCalls(contents string) []bindingCall {
 }
 
 func removeRecallBindings(data []byte) []byte {
-	contents := string(data)
-	if begin := strings.Index(contents, setupBegin); begin >= 0 {
-		if end := strings.Index(contents[begin:], setupEnd); end >= 0 {
-			end += begin + len(setupEnd)
-			if end < len(contents) && contents[end] == '\n' {
-				end++
-			}
-			contents = strings.TrimRight(contents[:begin], "\n") + "\n" + strings.TrimLeft(contents[end:], "\n")
-		}
-	}
+	// Bindings written before the managed fence existed are still matched
+	// individually below, so an old install upgrades cleanly.
+	contents := string(removeMarkedBlock(data, setupBegin, setupEnd))
 	calls := bindingCalls(contents)
 	for index := len(calls) - 1; index >= 0; index-- {
 		call := calls[index]

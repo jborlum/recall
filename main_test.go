@@ -229,7 +229,7 @@ func TestParseSelection(t *testing.T) {
 
 func TestPickerRequiresFZF(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, _, err := pick([]session{{ID: "first"}}, options{limit: 50}, true, false, "recall> ", bytes.NewReader(nil), &bytes.Buffer{})
+	_, _, err := pick([]session{{ID: "first"}}, options{limit: 50}, true, false, "recall> ", displayLine, bytes.NewReader(nil), &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "fzf is required") {
 		t.Fatalf("error = %v", err)
 	}
@@ -273,5 +273,134 @@ func writeFixture(t *testing.T, path, contents string) {
 	}
 	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// runeIndex reports the column of a substring. strings.Index returns a byte
+// offset, which differs between rows once a truncated title contains a
+// multi-byte ellipsis, and would compare column alignment incorrectly.
+func runeIndex(row, substring string) int {
+	byteIndex := strings.Index(row, substring)
+	if byteIndex < 0 {
+		return -1
+	}
+	return len([]rune(row[:byteIndex]))
+}
+
+func TestBookmarkRowsSeparateNameFromTitle(t *testing.T) {
+	updated := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	pinned := []session{
+		{Provider: "claude", Label: "mac-support", Title: "Testing recall on macOS", CWD: "/data/one", Updated: updated},
+		{Provider: "codex", Label: "hypr", Title: "A far longer conversation title that has to be truncated to fit its column", CWD: "/data/two", Updated: updated},
+	}
+	render := bookmarkRows(pinned)
+	offsets := map[string]int{}
+	for _, item := range pinned {
+		row := render(item)
+		if !strings.Contains(row, item.Label) {
+			t.Errorf("row is missing the bookmark name: %q", row)
+		}
+		if strings.Contains(row, item.Label+" — ") {
+			t.Errorf("row still glues the name to the title: %q", row)
+		}
+		offset := runeIndex(row, item.CWD)
+		if offset < 0 {
+			t.Fatalf("row is missing its directory: %q", row)
+		}
+		offsets[item.CWD] = offset
+	}
+	if offsets["/data/one"] != offsets["/data/two"] {
+		t.Fatalf("directory column is not aligned across rows: %v", offsets)
+	}
+	row := render(pinned[0])
+	if strings.Index(row, "mac-support") > strings.Index(row, "Testing recall") {
+		t.Fatalf("the name should come before the conversation title: %q", row)
+	}
+}
+
+// A bookmarked row used to be truncated before the label was attached, which
+// pushed the directory column out of line with every unbookmarked row.
+func TestDisplayLineAlignsBookmarkedRows(t *testing.T) {
+	updated := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	plain := session{Provider: "claude", Title: "Short title", CWD: "/data/plain", Updated: updated}
+	marked := session{
+		Provider: "claude", Label: "a-very-long-bookmark-name",
+		Title: "A long conversation title that would previously overflow the column entirely",
+		CWD:   "/data/marked", Updated: updated,
+	}
+	first := runeIndex(displayLine(plain), "/data/plain")
+	second := runeIndex(displayLine(marked), "/data/marked")
+	if first < 0 || second < 0 {
+		t.Fatalf("rows are missing their directories: %q %q", displayLine(plain), displayLine(marked))
+	}
+	if first != second {
+		t.Fatalf("directory column moved: plain=%d bookmarked=%d", first, second)
+	}
+}
+
+func TestBookmarkLabelWidthBounds(t *testing.T) {
+	if got := bookmarkLabelWidth(nil); got != 8 {
+		t.Errorf("empty list gave %d, want the 8 column minimum", got)
+	}
+	if got := bookmarkLabelWidth([]session{{Label: "twelve-chars"}}); got != 12 {
+		t.Errorf("width = %d, want 12 to fit the widest name", got)
+	}
+	if got := bookmarkLabelWidth([]session{{Label: strings.Repeat("x", 50)}}); got != 36 {
+		t.Errorf("width = %d, want the 36 column maximum", got)
+	}
+}
+
+func TestPadRightCountsRunes(t *testing.T) {
+	if got := padRight("æøå", 6); len([]rune(got)) != 6 {
+		t.Errorf("padRight(%q, 6) = %q, want six runes", "æøå", got)
+	}
+	if got := padRight("abcdef", 3); got != "abcdef" {
+		t.Errorf("padRight must not truncate, got %q", got)
+	}
+}
+
+// A bookmark whose transcript is gone has no session to read a date from, but the
+// bookmark file records when it was created.
+func TestMissingBookmarkShowsItsCreationDate(t *testing.T) {
+	created := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	bookmarks := map[string]bookmark{
+		"gone": {Provider: "claude", SessionID: "absent", CreatedAt: created, CachedTitle: "Old chat", CachedCWD: "/work"},
+	}
+	pinned := pinnedSessions(nil, bookmarks)
+	if len(pinned) != 1 || !pinned[0].Missing {
+		t.Fatalf("pinned = %#v", pinned)
+	}
+	if !pinned[0].Updated.Equal(created) {
+		t.Fatalf("Updated = %v, want the bookmark creation time %v", pinned[0].Updated, created)
+	}
+	row := bookmarkRows(pinned)(pinned[0])
+	if want := created.Local().Format("2006-01-02"); !strings.Contains(row, want) {
+		t.Fatalf("row %q does not show %s", row, want)
+	}
+	if strings.Contains(row, "----------") {
+		t.Fatalf("row still has a blank date: %q", row)
+	}
+}
+
+// Every discovered session gets its date from the transcript file, so the blank
+// placeholder should only ever appear for a bookmark with no recorded date.
+func TestDiscoveredSessionsAlwaysHaveADate(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("HOME", temp)
+	t.Setenv("CODEX_HOME", filepath.Join(temp, "codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(temp, "claude"))
+	// No timestamp field anywhere, so the date can only come from the file itself.
+	writeFixture(t, filepath.Join(temp, "claude", "projects", "p", "no-timestamp.jsonl"),
+		`{"type":"user","sessionId":"no-timestamp","cwd":"/work","message":{"role":"user","content":"hello"}}`+"\n")
+
+	sessions, _ := discover(options{})
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	if sessions[0].Updated.IsZero() {
+		t.Fatal("session has no date despite the transcript file having a modification time")
+	}
+	if strings.Contains(displayLine(sessions[0]), "----------") {
+		t.Fatalf("row has a blank date: %q", displayLine(sessions[0]))
 	}
 }

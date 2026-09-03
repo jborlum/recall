@@ -23,7 +23,7 @@ func pinActive(sessions []session, bookmarks map[string]bookmark, args []string,
 	if len(active) == 0 {
 		message := "No active Codex or Claude session found"
 		fmt.Fprintf(errOut, "recall: %s\n", strings.ToLower(message[:1])+message[1:])
-		notify(message)
+		notify(errOut, message)
 		return 1
 	}
 
@@ -31,11 +31,11 @@ func pinActive(sessions []session, bookmarks map[string]bookmark, args []string,
 	if len(active) > 1 {
 		if !terminalIO(in, out) {
 			fmt.Fprintln(errOut, "recall: multiple active sessions; run interactively to choose one")
-			printSessions(out, active, opts.limit)
+			printSessions(out, active, opts.limit, displayLine)
 			return 1
 		}
 		var err error
-		selected, _, err = pick(active, opts, false, false, "active> ", in, errOut)
+		selected, _, err = pick(active, opts, false, false, "active> ", displayLine, in, errOut)
 		if err != nil {
 			if !errors.Is(err, errCancelled) {
 				fmt.Fprintf(errOut, "recall: %v\n", err)
@@ -48,7 +48,7 @@ func pinActive(sessions []session, bookmarks map[string]bookmark, args []string,
 	if selected.Label != "" {
 		message := fmt.Sprintf("Already pinned as %s", selected.Label)
 		fmt.Fprintln(out, message)
-		notify(message)
+		notify(errOut, message)
 		return 0
 	}
 
@@ -82,7 +82,7 @@ func pinActive(sessions []session, bookmarks map[string]bookmark, args []string,
 	}
 	message := fmt.Sprintf("Pinned %s", label)
 	fmt.Fprintf(out, "%s -> %s:%s\n", message, selected.Provider, selected.ID)
-	notify(message)
+	notify(errOut, message)
 	return 0
 }
 
@@ -160,12 +160,9 @@ func detectActiveSessions(sessions []session) []session {
 		}
 	}
 	active := map[int]bool{}
-	for _, key := range []struct{ provider, value string }{
-		{"codex", os.Getenv("CODEX_THREAD_ID")},
-		{"codex", os.Getenv("CODEX_SESSION_ID")},
-		{"claude", os.Getenv("CLAUDE_SESSION_ID")},
-	} {
-		if index, ok := byID[key.provider+"\x00"+key.value]; ok && key.value != "" {
+	for _, name := range []string{"CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID"} {
+		value := os.Getenv(name)
+		if index, ok := byID[sessionIDVariable(name)+"\x00"+value]; ok && value != "" {
 			active[index] = true
 		}
 	}
@@ -179,8 +176,20 @@ func detectActiveSessions(sessions []session) []session {
 	return result
 }
 
-func applyActiveFallbacks(sessions []session, fallbacks map[string]int, active map[int]bool) {
-	for key, count := range fallbacks {
+// activeFallbackSlack absorbs small differences between the reported process
+// start time and the last transcript write.
+const activeFallbackSlack = 2 * time.Second
+
+// applyActiveFallbacks attributes provider processes to sessions by working
+// directory. Neither provider holds its transcript open, so for Claude this is
+// the only signal available and it carries the whole feature.
+//
+// starts holds one process start time per running process in that directory.
+// Each process claims the newest transcript it could still own, so a process
+// that has not written anything yet cannot be credited with an older session
+// left behind in the same directory.
+func applyActiveFallbacks(sessions []session, fallbacks map[string][]time.Time, active map[int]bool) {
+	for key, starts := range fallbacks {
 		parts := strings.SplitN(key, "\x00", 2)
 		if len(parts) != 2 {
 			continue
@@ -194,27 +203,91 @@ func applyActiveFallbacks(sessions []session, fallbacks map[string]int, active m
 		sort.Slice(candidates, func(i, j int) bool {
 			return sessions[candidates[i]].Updated.After(sessions[candidates[j]].Updated)
 		})
-		if len(candidates) < count {
-			count = len(candidates)
-		}
-		for _, index := range candidates[:count] {
-			active[index] = true
+		// Newest process first, so it takes the newest transcript and leaves the
+		// older ones available to the processes that could actually own them.
+		ordered := append([]time.Time(nil), starts...)
+		sort.Slice(ordered, func(i, j int) bool { return ordered[i].After(ordered[j]) })
+		claimed := map[int]bool{}
+		for _, start := range ordered {
+			for _, index := range candidates {
+				if claimed[index] || !writtenSince(sessions[index], start) {
+					continue
+				}
+				active[index], claimed[index] = true, true
+				break
+			}
 		}
 	}
+}
+
+// writtenSince reports whether a transcript could belong to a process started at
+// start. A live session is appended to while its process runs, so a transcript
+// last written before the process began belongs to an earlier run. A zero start
+// time means the platform could not report one, which skips the check.
+func writtenSince(item session, start time.Time) bool {
+	if start.IsZero() {
+		return true
+	}
+	return !item.Updated.Before(start.Add(-activeFallbackSlack))
+}
+
+// sessionIDVariable maps a provider's session-id environment variable to its
+// provider name, and returns "" for anything else.
+func sessionIDVariable(name string) string {
+	switch name {
+	case "CODEX_THREAD_ID", "CODEX_SESSION_ID":
+		return "codex"
+	case "CLAUDE_SESSION_ID":
+		return "claude"
+	}
+	return ""
+}
+
+// providerAliases lists the exact executable names each provider ships under.
+var providerAliases = map[string]string{
+	"codex": "codex", "codex-cli": "codex",
+	"claude": "claude", "claude-cli": "claude", "claude-code": "claude",
 }
 
 func commandProvider(command string) string {
 	command = strings.ToLower(strings.TrimSpace(command))
 	for _, argument := range strings.Fields(command) {
-		base := filepath.Base(argument)
-		if base == "codex" || strings.HasPrefix(base, "codex-") || strings.Contains(argument, "/@openai/codex/") {
+		if strings.Contains(argument, "/@openai/codex/") {
 			return "codex"
 		}
-		if base == "claude" || strings.HasPrefix(base, "claude-") || strings.Contains(argument, "/@anthropic-ai/claude-code/") {
+		if strings.Contains(argument, "/@anthropic-ai/claude-code/") {
 			return "claude"
+		}
+		base := filepath.Base(argument)
+		if provider, ok := providerAliases[base]; ok {
+			return provider
+		}
+		for _, provider := range []string{"codex", "claude"} {
+			if versionSuffixed(base, provider) {
+				return provider
+			}
 		}
 	}
 	return ""
+}
+
+// versionSuffixed matches version-pinned executables such as claude-2.1.259
+// without matching unrelated tools that merely share the prefix, like
+// claude-monitor, which would otherwise be mistaken for a live session.
+func versionSuffixed(base, provider string) bool {
+	if !strings.HasPrefix(base, provider+"-") {
+		return false
+	}
+	suffix := base[len(provider)+1:]
+	if suffix == "" {
+		return false
+	}
+	for _, char := range suffix {
+		if !unicode.IsDigit(char) && char != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 func samePath(left, right string) bool {
@@ -229,9 +302,11 @@ func samePath(left, right string) bool {
 	return filepath.Clean(left) == filepath.Clean(right)
 }
 
-func notify(message string) {
+func notify(errOut io.Writer, message string) {
 	if os.Getenv("RECALL_NOTIFY") == "" {
 		return
 	}
-	platformNotify(message)
+	if err := platformNotify(message); err != nil {
+		fmt.Fprintf(errOut, "recall: notify: %v\n", err)
+	}
 }

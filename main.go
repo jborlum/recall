@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var version = "0.7.0"
+var version = "0.8.0"
 
 type session struct {
 	Provider   string
@@ -158,7 +158,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		return doctor(sessions, bookmarks, out)
 	case "pins":
 		pinned := pinnedSessions(sessions, bookmarks)
-		printSessions(out, pinned, opts.limit)
+		printSessions(out, pinned, opts.limit, bookmarkRows(pinned))
 		return 0
 	case "pin-active":
 		return pinActive(sessions, bookmarks, rest, opts, in, out, errOut)
@@ -190,11 +190,11 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 		return 1
 	}
 	if opts.print || !terminalIO(in, out) {
-		printSessions(out, matches, opts.limit)
+		printSessions(out, matches, opts.limit, displayLine)
 		return 0
 	}
 
-	selected, action, err := pick(matches, opts, command != "pin", false, "recall> ", in, errOut)
+	selected, action, err := pick(matches, opts, command != "pin", false, "recall> ", displayLine, in, errOut)
 	if err != nil {
 		if !errors.Is(err, errCancelled) {
 			fmt.Fprintf(errOut, "recall: %v\n", err)
@@ -735,7 +735,13 @@ func pinnedSessions(sessions []session, bookmarks map[string]bookmark) []session
 		pin := bookmarks[label]
 		item, ok := byKey[pin.Provider+"\x00"+pin.SessionID]
 		if !ok {
-			item = session{Provider: pin.Provider, ID: pin.SessionID, Title: pin.CachedTitle, CWD: pin.CachedCWD, Missing: true}
+			// The transcript is gone, so fall back to what the bookmark itself
+			// recorded. Its creation date is the only date left for the row, and it
+			// reads better than a blank column next to the [missing] marker.
+			item = session{
+				Provider: pin.Provider, ID: pin.SessionID, Title: pin.CachedTitle,
+				CWD: pin.CachedCWD, Updated: pin.CreatedAt, Missing: true,
+			}
 		}
 		item.Label = label
 		item.Note = pin.Note
@@ -765,39 +771,102 @@ func doctor(sessions []session, bookmarks map[string]bookmark, out io.Writer) in
 	return 0
 }
 
-func printSessions(out io.Writer, sessions []session, limit int) {
+// rowWidth is the combined width of the columns between the date and the working
+// directory, so every view lines the directory up in the same place.
+const rowWidth = 72
+
+// rowRenderer formats one row. Bookmark views size a label column across the
+// whole list, so a renderer is built from the list rather than being a plain
+// function of a single session.
+type rowRenderer func(session) string
+
+// bookmarkRows renders the bookmark name in its own column, with the
+// conversation title beside it.
+func bookmarkRows(sessions []session) rowRenderer {
+	labelWidth := bookmarkLabelWidth(sessions)
+	return func(item session) string { return displayBookmarkLine(item, labelWidth) }
+}
+
+// bookmarkLabelWidth sizes the label column to the widest name in the list, so
+// short names leave no wide gap and long ones are not truncated more than needed.
+func bookmarkLabelWidth(sessions []session) int {
+	width := 8
+	for _, item := range sessions {
+		if length := len([]rune(item.Label)); length > width {
+			width = length
+		}
+	}
+	if width > 36 {
+		width = 36
+	}
+	return width
+}
+
+func printSessions(out io.Writer, sessions []session, limit int, render rowRenderer) {
 	if len(sessions) < limit {
 		limit = len(sessions)
 	}
 	for _, item := range sessions[:limit] {
-		fmt.Fprintln(out, displayLine(item))
+		fmt.Fprintln(out, render(item))
 	}
 }
 
 func displayLine(item session) string {
-	mark := " "
-	if item.Label != "" {
-		mark = "*"
-	}
-	status := ""
-	if item.Archived {
-		status = " [archived]"
-	}
-	if item.Missing {
-		status = " [missing]"
-	}
-	title := oneLine(item.Title, 72)
+	title := item.Title
 	if title == "" {
 		title = "(untitled)"
 	}
 	if item.Label != "" {
 		title = item.Label + " — " + title
 	}
-	date := "----------"
-	if !item.Updated.IsZero() {
-		date = item.Updated.Local().Format("2006-01-02")
+	// Truncate after the label is attached, or a bookmarked row overflows the
+	// column and shifts the working directory out of line with every other row.
+	return fmt.Sprintf("%s %-6s %s  %s  %s%s", rowMark(item), item.Provider, rowDate(item),
+		padRight(oneLine(title, rowWidth), rowWidth), shortHome(item.CWD), rowStatus(item))
+}
+
+func displayBookmarkLine(item session, labelWidth int) string {
+	titleWidth := rowWidth - labelWidth - 2
+	title := item.Title
+	if title == "" {
+		title = "(untitled)"
 	}
-	return fmt.Sprintf("%s %-6s %s  %-72s  %s%s", mark, item.Provider, date, title, shortHome(item.CWD), status)
+	return fmt.Sprintf("%s %-6s %s  %s  %s  %s%s", rowMark(item), item.Provider, rowDate(item),
+		padRight(oneLine(item.Label, labelWidth), labelWidth),
+		padRight(oneLine(title, titleWidth), titleWidth), shortHome(item.CWD), rowStatus(item))
+}
+
+func rowMark(item session) string {
+	if item.Label != "" {
+		return "*"
+	}
+	return " "
+}
+
+func rowStatus(item session) string {
+	switch {
+	case item.Missing:
+		return " [missing]"
+	case item.Archived:
+		return " [archived]"
+	}
+	return ""
+}
+
+func rowDate(item session) string {
+	if item.Updated.IsZero() {
+		return "----------"
+	}
+	return item.Updated.Local().Format("2006-01-02")
+}
+
+// padRight pads to width by rune count. Titles routinely contain non-ASCII, and
+// the %-Ns verb pads by bytes, which would misalign the columns that follow.
+func padRight(value string, width int) string {
+	if pad := width - len([]rune(value)); pad > 0 {
+		return value + strings.Repeat(" ", pad)
+	}
+	return value
 }
 
 func pickerText(item session) string {
@@ -844,7 +913,7 @@ func terminalIO(in io.Reader, out io.Writer) bool {
 	return inErr == nil && outErr == nil && inInfo.Mode()&os.ModeCharDevice != 0 && outInfo.Mode()&os.ModeCharDevice != 0
 }
 
-func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt string, in io.Reader, errOut io.Writer) (session, selectionAction, error) {
+func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt string, render rowRenderer, in io.Reader, errOut io.Writer) (session, selectionAction, error) {
 	limit := opts.limit
 	if len(sessions) < limit {
 		limit = len(sessions)
@@ -857,7 +926,7 @@ func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt 
 	var input strings.Builder
 	for index, item := range candidates {
 		// Keep the transcript searchable without adding it to the visible row.
-		fmt.Fprintf(&input, "%d\t\x1b[8m%s\x1b[0m\t%s\n", index, pickerText(item), displayLine(item))
+		fmt.Fprintf(&input, "%d\t\x1b[8m%s\x1b[0m\t%s\n", index, pickerText(item), render(item))
 	}
 	var selected bytes.Buffer
 	arguments := []string{"--ansi", "--delimiter=\\t", "--nth=2,3", "--prompt=" + prompt, "--height=80%", "--reverse"}

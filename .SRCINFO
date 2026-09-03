@@ -1,6 +1,6 @@
 pkgbase = recall
 	pkgdesc = Find, bookmark, and reopen local Codex and Claude conversations
-	pkgver = 0.7.0
+	pkgver = 0.8.0
 	pkgrel = 1
 	url = https://github.com/jborlum/recall
 	arch = x86_64
@@ -10,7 +10,7 @@ pkgbase = recall
 	makedepends = go
 	depends = fzf
 	options = !debug
-	source = recall-src::git+ssh://git@github.com/jborlum/recall.git#tag=v0.7.0
+	source = recall-src::git+ssh://git@github.com/jborlum/recall.git#tag=v0.8.0
 	sha256sums = SKIP
 
 pkgname = recall

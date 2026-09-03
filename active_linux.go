@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func detectPlatformActiveSessions(sessions []session, byID, byPath map[string]int, active map[int]bool) {
@@ -15,7 +16,7 @@ func detectPlatformActiveSessions(sessions []session, byID, byPath map[string]in
 		procRoot = "/proc"
 	}
 	entries, _ := os.ReadDir(procRoot)
-	fallbacks := map[string]int{}
+	fallbacks := map[string][]time.Time{}
 	for _, entry := range entries {
 		if !entry.IsDir() || !numeric(entry.Name()) {
 			continue
@@ -24,18 +25,15 @@ func detectPlatformActiveSessions(sessions []session, byID, byPath map[string]in
 		matched := false
 		if data, err := os.ReadFile(filepath.Join(processRoot, "environ")); err == nil {
 			for _, field := range strings.Split(string(data), "\x00") {
-				pair := strings.SplitN(field, "=", 2)
-				if len(pair) != 2 {
+				name, value, found := strings.Cut(field, "=")
+				if !found || value == "" {
 					continue
 				}
-				provider := ""
-				switch pair[0] {
-				case "CODEX_THREAD_ID", "CODEX_SESSION_ID":
-					provider = "codex"
-				case "CLAUDE_SESSION_ID":
-					provider = "claude"
+				provider := sessionIDVariable(name)
+				if provider == "" {
+					continue
 				}
-				if index, ok := byID[provider+"\x00"+pair[1]]; ok && provider != "" {
+				if index, ok := byID[provider+"\x00"+value]; ok {
 					active[index], matched = true, true
 				}
 			}
@@ -64,10 +62,22 @@ func detectPlatformActiveSessions(sessions []session, byID, byPath map[string]in
 		}
 		cwd, err := os.Readlink(filepath.Join(processRoot, "cwd"))
 		if err == nil {
-			fallbacks[provider+"\x00"+cwd]++
+			key := provider + "\x00" + cwd
+			fallbacks[key] = append(fallbacks[key], linuxProcessStart(processRoot))
 		}
 	}
 	applyActiveFallbacks(sessions, fallbacks, active)
+}
+
+// linuxProcessStart reads the process start time from the /proc entry's own
+// modification time, which the kernel sets when the process is created. A zero
+// time skips the transcript age check for that process.
+func linuxProcessStart(processRoot string) time.Time {
+	info, err := os.Stat(processRoot)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
 }
 
 func numeric(value string) bool {
@@ -93,8 +103,10 @@ func linuxProcessProvider(root string) string {
 	return ""
 }
 
-func platformNotify(message string) {
-	if path, err := exec.LookPath("notify-send"); err == nil {
-		_ = exec.Command(path, "Recall", message).Run()
+func platformNotify(message string) error {
+	path, err := exec.LookPath("notify-send")
+	if err != nil {
+		return err
 	}
+	return exec.Command(path, "Recall", message).Run()
 }

@@ -11,7 +11,8 @@ import (
 
 func manageBookmarks(sessions []session, bookmarks map[string]bookmark, opts options, in io.Reader, out, errOut io.Writer) int {
 	if !terminalIO(in, out) {
-		printSessions(out, pinnedSessions(sessions, bookmarks), opts.limit)
+		pinned := pinnedSessions(sessions, bookmarks)
+		printSessions(out, pinned, opts.limit, bookmarkRows(pinned))
 		return 0
 	}
 	for {
@@ -19,10 +20,10 @@ func manageBookmarks(sessions []session, bookmarks map[string]bookmark, opts opt
 		if len(pinned) == 0 {
 			message := "No bookmarks"
 			fmt.Fprintln(out, message)
-			notify(message)
+			notify(errOut, message)
 			return 0
 		}
-		selected, action, err := pick(pinned, opts, true, true, "bookmarks> ", in, errOut)
+		selected, action, err := pick(pinned, opts, true, true, "bookmarks> ", bookmarkRows(pinned), in, errOut)
 		if err != nil {
 			if errors.Is(err, errCancelled) {
 				return 130
@@ -46,7 +47,7 @@ func manageBookmarks(sessions []session, bookmarks map[string]bookmark, opts opt
 			}
 			message := fmt.Sprintf("Deleted bookmark %s", selected.Label)
 			fmt.Fprintln(out, message)
-			notify(message)
+			notify(errOut, message)
 			continue
 		}
 		if selected.Missing {

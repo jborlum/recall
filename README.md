@@ -20,6 +20,16 @@ The picker searches the full visible user and assistant transcript text while
 displaying a compact session summary. Internal or encrypted provider fields are
 not searched.
 
+`recall bookmark` and `recall bookmark list` show the bookmark name in its own
+column, sized to the widest name, with the conversation title beside it. Both
+views search the full transcript just like the main picker, so a word from the
+conversation finds a bookmark even when its name says nothing about it.
+
+Session dates come from the transcript file, so every discovered session has
+one. A bookmark marked `[missing]` has no transcript left to read, and falls back
+to the title, directory, and date recorded in the bookmark file when it was
+created.
+
 ## Requirements
 
 - The `codex` and/or `claude` CLI.
@@ -84,6 +94,31 @@ Grant Hammerspoon the requested Accessibility and Terminal automation
 permissions. If its `hs` command is not installed, reload the Hammerspoon
 config from its menu after setup.
 
+Note that `brew install --HEAD ./Formula/recall.rb` builds from the pushed
+`main` branch rather than from your working tree, so it will not pick up
+uncommitted changes.
+
+### macOS without Homebrew
+
+Nothing in `recall` needs Homebrew. Build it with Go and put it on your `PATH`:
+
+```sh
+git clone https://github.com/jborlum/recall.git
+cd recall
+go test ./...
+CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o recall .
+install -Dm755 recall "$HOME/.local/bin/recall"
+```
+
+`fzf` is the only runtime dependency. If it is not already installed, download a
+release binary from [the `fzf` releases
+page](https://github.com/junegunn/fzf/releases) and place it on your `PATH`.
+
+For global hotkeys without Homebrew, download the Hammerspoon release zip from
+[its releases page](https://github.com/Hammerspoon/Hammerspoon/releases),
+unzip it into `/Applications`, launch it once to grant Accessibility
+permission, then run `recall setup-macos`.
+
 ## Usage
 
 ```sh
@@ -140,12 +175,66 @@ On macOS, `recall setup-macos` manages equivalent Hammerspoon bindings:
 - `COMMAND+OPTION+R` opens the bookmark manager.
 - `COMMAND+OPTION+L` opens the normal session picker.
 
-The commands open in Terminal.app. Manage the bindings with:
+Manage the bindings with:
 
 ```sh
 recall setup-macos status
 recall setup-macos remove
 ```
+
+### Choosing the terminal
+
+`recall setup-macos` opens the commands in the terminal it was run from,
+detected through `TERM_PROGRAM`. Pick one explicitly with `--terminal`:
+
+```sh
+recall setup-macos --terminal ghostty
+```
+
+The supported names are `terminal` (Terminal.app), `ghostty`, and `iterm`
+(iTerm2). Terminal.app is used when the current terminal is not recognised.
+Re-running `setup-macos` with a different `--terminal` rewrites the managed
+block in place, and `recall setup-macos status` reports which terminal is
+configured. `RECALL_TERMINAL` sets the default if you would rather not pass the
+flag.
+
+Terminal.app and iTerm2 are driven with AppleScript. Ghostty refuses to launch
+its emulator from its own CLI on macOS, so its bindings go through
+`open -na Ghostty.app --args -e` instead.
+
+To add another terminal, add an entry to `macTerminals` in `setup_macos.go`
+returning the Lua that opens a window running the given shell command.
+
+If `recall setup-macos` reports that it could not reload Hammerspoon, reload the
+config from the Hammerspoon menu. The bundled `hs` command only works when
+`init.lua` loads the IPC module, which is not enabled by default:
+
+```lua
+require("hs.ipc")
+```
+
+The hotkeys run with `RECALL_NOTIFY=1` so results appear as desktop
+notifications. On macOS these are delivered by `osascript`, which exits
+successfully even when notifications are suppressed, so a silent hotkey usually
+means the terminal application has not been granted notification permission in
+System Settings > Notifications rather than that `recall` failed.
+
+## How active sessions are found
+
+`recall bookmark active` has to work out which session a running `codex` or
+`claude` process belongs to. It tries three signals, in order of reliability:
+
+1. The `CODEX_THREAD_ID`, `CODEX_SESSION_ID`, or `CLAUDE_SESSION_ID` variable,
+   read from recall's own environment and from each provider process.
+2. An open transcript file descriptor belonging to the process.
+3. The process working directory, matched against the newest transcript for that
+   provider and directory that was written after the process started.
+
+Neither provider currently exports a session id or holds its transcript open, so
+in practice the working directory is what identifies a session. That means a
+provider process which has not written anything yet is reported as having no
+active session, rather than being attributed to an older session left behind in
+the same directory.
 
 ## Storage and privacy
 

@@ -33,25 +33,98 @@ func previewFixture(t *testing.T) string {
 	return path
 }
 
-// The panel exists to show where the query hit, so a long answer must surface the
-// matching line rather than its opening paragraph.
-func TestPreviewShowsMatchingLinesOnly(t *testing.T) {
+// A hit has to arrive with enough of the conversation around it to read, but not
+// the whole turn, or a long answer buries what matched.
+func TestPreviewShowsAHitWithSurroundingContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "long.jsonl")
+	writeFixture(t, path, claudeAssistant("s", strings.Join([]string{
+		"far above one", "far above two", "just above",
+		"The relay dropped because Zscaler re-authenticated",
+		"just below", "far below one", "far below two",
+	}, "\n")))
 	var out, errOut bytes.Buffer
-	if code := previewTranscript(previewFixture(t), "zscaler", &out, &errOut); code != 0 {
+	if code := previewTranscript(path, "zscaler", &out, &errOut); code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, errOut.String())
 	}
 	text := stripANSI(out.String())
-	if !strings.Contains(text, "Zscaler re-authenticated") {
-		t.Errorf("matching line missing: %q", text)
+	for _, want := range []string{"Zscaler re-authenticated", "just above", "just below", "assistant"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q from %q", want, text)
+		}
 	}
-	if strings.Contains(text, "Opening paragraph") || strings.Contains(text, "A closing line") {
-		t.Errorf("non-matching lines of the same turn were included: %q", text)
-	}
-	if !strings.Contains(text, "assistant") {
-		t.Errorf("the speaker should be labelled: %q", text)
+	for _, unwanted := range []string{"far above one", "far below two"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("line beyond the context window was included: %q", unwanted)
+		}
 	}
 	if !strings.Contains(out.String(), previewHit) {
 		t.Error("the matched term should be highlighted")
+	}
+}
+
+// Cycling through matches only makes sense if each is labelled with its position.
+func TestPreviewNumbersEveryMatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "many.jsonl")
+	turn := func(n string) string {
+		return claudeAssistant("s", "padding\npadding\nhit about zscaler "+n+"\npadding\npadding")
+	}
+	writeFixture(t, path, turn("one")+turn("two")+turn("three"))
+	var out, errOut bytes.Buffer
+	previewTranscript(path, "zscaler", &out, &errOut)
+	text := stripANSI(out.String())
+	for _, want := range []string{"── 1/3 ──", "── 2/3 ──", "── 3/3 ──"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing label %q from %q", want, text)
+		}
+	}
+}
+
+// Matches close together would otherwise repeat the same context lines twice.
+func TestPreviewMergesAdjacentMatches(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "adjacent.jsonl")
+	writeFixture(t, path, claudeAssistant("s", "zscaler first\nmiddle\nzscaler second"))
+	var out, errOut bytes.Buffer
+	previewTranscript(path, "zscaler", &out, &errOut)
+	text := stripANSI(out.String())
+	if !strings.Contains(text, "── 1/1 ──") {
+		t.Errorf("adjacent matches should merge into one window: %q", text)
+	}
+	if strings.Count(text, "middle") != 1 {
+		t.Errorf("context repeated: %q", text)
+	}
+}
+
+// fzf matches terms anywhere in the transcript, so they need not share a line.
+// A line holding all of them is the better hit, but one term is still a hit.
+func TestPreviewFallsBackToPartialTermMatches(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spread.jsonl")
+	writeFixture(t, path,
+		claudeUser("s", "a question about zscaler")+
+			claudeAssistant("s", "an answer about wireguard"))
+	var out, errOut bytes.Buffer
+	previewTranscript(path, "zscaler wireguard", &out, &errOut)
+	text := stripANSI(out.String())
+	if !strings.Contains(text, "zscaler") || !strings.Contains(text, "wireguard") {
+		t.Errorf("both terms should appear as separate matches: %q", text)
+	}
+	if !strings.Contains(text, "── 1/2 ──") {
+		t.Errorf("want two numbered matches: %q", text)
+	}
+}
+
+// A line holding every term is preferred over lines holding only one.
+func TestPreviewPrefersLinesHoldingEveryTerm(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "both.jsonl")
+	writeFixture(t, path,
+		claudeAssistant("s", "only zscaler here\n\n\n\n\n\nzscaler and wireguard together"))
+	var out, errOut bytes.Buffer
+	previewTranscript(path, "zscaler wireguard", &out, &errOut)
+	text := stripANSI(out.String())
+	if !strings.Contains(text, "zscaler and wireguard together") {
+		t.Errorf("the line with both terms should be the match: %q", text)
+	}
+	if strings.Contains(text, "only zscaler here") {
+		t.Errorf("a line with one term should not be shown when a better one exists: %q", text)
 	}
 }
 

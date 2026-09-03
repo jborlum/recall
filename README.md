@@ -78,15 +78,21 @@ recall --provider codex auth   # only Codex sessions
 recall --cwd .                 # only sessions from this directory tree
 ```
 
-In the picker, `Enter` resumes, `Ctrl-F` forks, `Ctrl-P` hides or shows the
-preview panel, and `Esc` closes.
+In the picker, `Enter` resumes, `Ctrl-F` forks, and `Esc` closes.
 
 Searching covers the whole visible conversation, not just the title, so a
-remembered phrase finds the session. Encrypted and internal provider fields are
-excluded. The list keeps its provider, date, and title columns while you type,
-and the panel below shows the lines that matched in the selected session, with
-the search terms marked. With no search term it shows the conversation from the
-start. Only the selected session is ever read for the panel.
+remembered phrase finds the session even if nothing in its title hints at it.
+Encrypted and internal provider fields are excluded.
+
+The list keeps its provider, date, and title columns while you type. The panel
+below shows every match in the selected conversation, each numbered `3/12` and
+given the lines around it, with your terms marked. `Shift-Up`/`Shift-Down` and
+`Alt-Up`/`Alt-Down` walk through the matches and wrap around at the end;
+`Ctrl-/` hides the panel. With no search term the panel shows the conversation
+from the start.
+
+Only the selected transcript is ever read for the panel, so the cost does not
+grow with the number of sessions.
 
 ```sh
 recall bookmark                       # resume, fork, or delete a bookmark

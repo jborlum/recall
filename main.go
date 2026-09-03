@@ -250,8 +250,9 @@ Flags:
   --preview PATH [QUERY]            print one transcript, marking the query
   --version                         print the version
 
-In the picker: Enter resumes, Ctrl-F forks, Ctrl-P toggles the preview,
-Esc closes. The panel shows the lines matching your search.
+In the picker: Enter resumes, Ctrl-F forks, Esc closes. The panel below shows
+each match in the selected conversation with the lines around it, numbered.
+Shift-Up/Down and Alt-Up/Down walk through the matches, Ctrl-/ hides the panel.
 `)
 }
 
@@ -1105,8 +1106,12 @@ func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt 
 	arguments := []string{
 		"--ansi", "--delimiter=\\t", "--with-nth=2", "--ellipsis=", "--no-hscroll",
 		"--prompt=" + prompt, "--height=80%", "--reverse",
-		"--preview=" + previewCommand(), "--preview-window=down,55%,wrap,border-top",
-		"--bind=ctrl-p:toggle-preview",
+		// cycle lets the panel wrap from the last match back to the first, so the
+		// scroll keys walk the matches round. ctrl-p is left alone: fzf binds it to
+		// up-match, and taking it would cost a navigation key.
+		"--preview=" + previewCommand(), "--preview-window=down,55%,wrap,cycle,border-top",
+		"--bind=ctrl-/:toggle-preview",
+		"--bind=alt-down:preview-half-page-down", "--bind=alt-up:preview-half-page-up",
 	}
 	if allowDelete {
 		arguments = append(arguments, "--expect=enter,ctrl-f,ctrl-d", "--header=Enter: resume   Ctrl-F: fork   Ctrl-D: delete   Esc: close")

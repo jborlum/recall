@@ -14,12 +14,33 @@ import (
 // that text into view. The panel is rendered by re-running recall with --preview,
 // so only the selected session is ever read.
 const (
-	// previewMaxLines bounds a panel that is redrawn on every keystroke.
-	previewMaxLines = 300
+	// previewContext is how many lines of the conversation are shown either side
+	// of a matching line, so a hit arrives with enough around it to read.
+	previewContext = 2
+	// previewMaxHits and previewMaxLines only guard against pathological
+	// transcripts; both are far above anything observed, and reaching either says
+	// so in the panel rather than truncating in silence. Neither bounds the cost
+	// of a redraw, which is dominated by parsing the file.
+	previewMaxHits  = 500
+	previewMaxLines = 8000
 	previewHit      = "\x1b[7m"
 	previewRole     = "\x1b[1;36m"
 	previewReset    = "\x1b[0m"
+	previewNote     = "\x1b[2m"
 )
+
+// previewTurn is one thing said, split into lines so hits can be shown with
+// their surroundings.
+type previewTurn struct {
+	role  string
+	lines []string
+}
+
+// previewMatch is one window of a turn around one or more matching lines.
+type previewMatch struct {
+	role  string
+	lines []string
+}
 
 // previewCommand is the shell command fzf runs for the selected row. {3} is the
 // transcript path and {q} the current query, both quoted by fzf. A missing path
@@ -35,64 +56,130 @@ func previewCommand() string {
 }
 
 func previewTranscript(path, query string, out, errOut io.Writer) int {
-	tokens := strings.Fields(strings.ToLower(query))
-	var hits, opening []string
+	var turns []previewTurn
 	err := transcriptTurns(path, func(role, text string) {
-		header := previewRole + role + previewReset
-		if len(opening) < previewMaxLines {
-			opening = append(opening, header)
-			opening = append(opening, strings.Split(strings.TrimRight(text, " \t\n"), "\n")...)
-			opening = append(opening, "")
-		}
-		if len(tokens) == 0 || len(hits) >= previewMaxLines {
-			return
-		}
-		if lines := matchingLines(text, tokens); len(lines) > 0 && containsAll(strings.ToLower(text), tokens) {
-			hits = append(hits, header)
-			hits = append(hits, lines...)
-			hits = append(hits, "")
-		}
+		turns = append(turns, previewTurn{role, strings.Split(strings.TrimRight(text, " \t\n"), "\n")})
 	})
 	if err != nil {
 		fmt.Fprintf(errOut, "recall: preview %s: %v\n", path, err)
 		return 1
 	}
-	// Matching lines are the point of the panel, but a query can match a title or
-	// a directory and nothing that was said, which would leave it blank.
-	lines := hits
-	if len(lines) == 0 {
-		lines = opening
+	tokens := strings.Fields(strings.ToLower(query))
+	if matches := previewMatches(turns, tokens); len(matches) > 0 {
+		writeMatches(out, matches)
+		return 0
 	}
-	if len(lines) > previewMaxLines {
-		lines = lines[:previewMaxLines]
-	}
-	for _, line := range lines {
-		fmt.Fprintln(out, line)
-	}
+	// A query can match a title or a directory and nothing that was said, so the
+	// conversation is shown rather than an empty panel.
+	writeConversation(out, turns)
 	return 0
 }
 
-// matchingLines picks out the lines of a turn that mention a query token, so a
-// long answer shows the part that matched rather than its opening paragraph.
-func matchingLines(text string, tokens []string) []string {
-	var result []string
-	for _, line := range strings.Split(text, "\n") {
-		lowered, matched := strings.ToLower(line), false
-		for _, token := range tokens {
-			if strings.Contains(lowered, token) {
-				matched = true
-				break
+// previewMatches finds the windows worth showing. A line holding every term is
+// the best hit, so those are preferred; failing that, fzf may have matched terms
+// spread across the conversation, and a line holding any of them still shows
+// where the search landed.
+func previewMatches(turns []previewTurn, tokens []string) []previewMatch {
+	if len(tokens) == 0 {
+		return nil
+	}
+	for _, everyToken := range []bool{true, false} {
+		var matches []previewMatch
+		for _, turn := range turns {
+			for _, window := range matchWindows(turn.lines, tokens, everyToken) {
+				matches = append(matches, previewMatch{turn.role, window})
 			}
 		}
-		if !matched {
+		if len(matches) > 0 {
+			return matches
+		}
+	}
+	return nil
+}
+
+// matchWindows returns each run of matching lines with its surrounding context,
+// merging runs that would otherwise repeat the same lines.
+func matchWindows(lines []string, tokens []string, everyToken bool) [][]string {
+	var marked []int
+	for index, line := range lines {
+		lowered := strings.ToLower(line)
+		matched := containsAny(lowered, tokens)
+		if everyToken {
+			matched = containsAll(lowered, tokens)
+		}
+		if matched {
+			marked = append(marked, index)
+		}
+	}
+	if len(marked) == 0 {
+		return nil
+	}
+	var windows [][]string
+	start, end := marked[0], marked[0]
+	for _, index := range marked[1:] {
+		if index-end <= 2*previewContext+1 {
+			end = index
 			continue
 		}
+		windows = append(windows, window(lines, start, end, tokens))
+		start, end = index, index
+	}
+	return append(windows, window(lines, start, end, tokens))
+}
+
+// window cuts lines[first:last] widened by previewContext and marks the terms.
+func window(lines []string, first, last int, tokens []string) []string {
+	from, to := max(first-previewContext, 0), min(last+previewContext, len(lines)-1)
+	result := make([]string, 0, to-from+1)
+	for _, line := range lines[from : to+1] {
 		for _, token := range tokens {
 			line = highlight(line, token)
 		}
 		result = append(result, strings.TrimRight(line, " \t"))
 	}
 	return result
+}
+
+func writeMatches(out io.Writer, matches []previewMatch) {
+	shown := matches
+	if len(shown) > previewMaxHits {
+		shown = shown[:previewMaxHits]
+	}
+	for index, match := range shown {
+		fmt.Fprintf(out, "%s── %d/%d ── %s%s\n", previewRole, index+1, len(matches), match.role, previewReset)
+		for _, line := range match.lines {
+			fmt.Fprintln(out, line)
+		}
+		fmt.Fprintln(out)
+	}
+	if len(shown) < len(matches) {
+		fmt.Fprintf(out, "%s%d more matches not shown%s\n", previewNote, len(matches)-len(shown), previewReset)
+	}
+}
+
+func writeConversation(out io.Writer, turns []previewTurn) {
+	written := 0
+	for _, turn := range turns {
+		if written >= previewMaxLines {
+			fmt.Fprintf(out, "%sconversation continues beyond %d lines%s\n", previewNote, previewMaxLines, previewReset)
+			return
+		}
+		fmt.Fprintf(out, "%s%s%s\n", previewRole, turn.role, previewReset)
+		for _, line := range turn.lines {
+			fmt.Fprintln(out, line)
+		}
+		fmt.Fprintln(out)
+		written += len(turn.lines) + 2
+	}
+}
+
+func containsAny(haystack string, tokens []string) bool {
+	for _, token := range tokens {
+		if strings.Contains(haystack, token) {
+			return true
+		}
+	}
+	return false
 }
 
 // highlight marks every case-insensitive occurrence of token. Matching on a

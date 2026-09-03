@@ -8,7 +8,7 @@ license=('LicenseRef-All-Rights-Reserved')
 makedepends=('git' 'go')
 depends=('fzf')
 options=('!debug')
-source=("${pkgname}-src::git+ssh://git@github.com/jborlum/recall.git#tag=v${pkgver}")
+source=("${pkgname}-src::git+https://github.com/jborlum/recall.git#tag=v${pkgver}")
 sha256sums=('SKIP')
 
 build() {

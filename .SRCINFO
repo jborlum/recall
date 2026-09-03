@@ -10,7 +10,7 @@ pkgbase = recall
 	makedepends = go
 	depends = fzf
 	options = !debug
-	source = recall-src::git+ssh://git@github.com/jborlum/recall.git#tag=v0.9.0
+	source = recall-src::git+https://github.com/jborlum/recall.git#tag=v0.9.0
 	sha256sums = SKIP
 
 pkgname = recall

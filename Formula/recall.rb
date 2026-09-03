@@ -1,7 +1,7 @@
 class Recall < Formula
   desc "Find, bookmark, and reopen local Codex and Claude conversations"
   homepage "https://github.com/jborlum/recall"
-  head "ssh://git@github.com/jborlum/recall.git", branch: "main"
+  head "https://github.com/jborlum/recall.git", branch: "main"
 
   depends_on "go" => :build
   depends_on "fzf"

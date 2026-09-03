@@ -18,7 +18,7 @@ to their official CLIs. There is no daemon, index, database, or network access.
 ### Arch Linux / Omarchy
 
 ```sh
-git clone git@github.com:jborlum/recall.git
+git clone https://github.com/jborlum/recall.git
 cd recall
 makepkg -si
 ```
@@ -28,14 +28,22 @@ builds the release tag named in `PKGBUILD`, not your working tree.
 
 ### macOS
 
+This repository doubles as its own Homebrew tap, so no clone is needed:
+
 ```sh
-git clone git@github.com:jborlum/recall.git
-cd recall
-brew install --HEAD ./Formula/recall.rb
+brew tap jborlum/recall https://github.com/jborlum/recall.git
+brew install --HEAD jborlum/recall/recall
 ```
 
-`--HEAD` builds the pushed `main` branch, so uncommitted local changes are not
-included. For global hotkeys:
+Homebrew requires formulae to live in a tap, so `brew install ./Formula/recall.rb`
+does not work. `--HEAD` is required because there is no bottled release; it
+builds the current `main`, not your working tree. Upgrade with:
+
+```sh
+brew upgrade --fetch-HEAD jborlum/recall/recall
+```
+
+For global hotkeys:
 
 ```sh
 brew install --cask hammerspoon
@@ -47,7 +55,7 @@ recall setup
 Works the same on macOS and Linux, and needs no Homebrew:
 
 ```sh
-git clone git@github.com:jborlum/recall.git
+git clone https://github.com/jborlum/recall.git
 cd recall
 go test ./...
 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o recall .

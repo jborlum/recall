@@ -168,9 +168,14 @@ func TestDetectActiveSessionFromProcessCWD(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("RECALL_PROC_ROOT", filepath.Dir(proc))
+	// Both transcripts must look newer than the synthetic /proc entry, whose
+	// modification time stands in for the process start time. A transcript last
+	// written before its process began belongs to an earlier run and is skipped,
+	// so fixed timestamps from 1970 would leave nothing for the process to claim.
+	now := time.Now()
 	sessions := []session{
-		{Provider: "codex", ID: "older", CWD: cwd, Updated: time.Unix(1, 0)},
-		{Provider: "codex", ID: "newer", CWD: cwd, Updated: time.Unix(2, 0)},
+		{Provider: "codex", ID: "older", CWD: cwd, Updated: now},
+		{Provider: "codex", ID: "newer", CWD: cwd, Updated: now.Add(time.Minute)},
 	}
 	active := detectActiveSessions(sessions)
 	if len(active) != 1 || active[0].ID != "newer" {
@@ -198,9 +203,12 @@ func TestDetectsMultipleProcessesInTheSameDirectory(t *testing.T) {
 		}
 	}
 	t.Setenv("RECALL_PROC_ROOT", procRoot)
+	// Recent timestamps for the same reason as above: each process claims one
+	// transcript, and only transcripts written since it started are candidates.
+	now := time.Now()
 	sessions := []session{
-		{Provider: "codex", ID: "older", CWD: cwd, Updated: time.Unix(1, 0)},
-		{Provider: "codex", ID: "newer", CWD: cwd, Updated: time.Unix(2, 0)},
+		{Provider: "codex", ID: "older", CWD: cwd, Updated: now},
+		{Provider: "codex", ID: "newer", CWD: cwd, Updated: now.Add(time.Minute)},
 	}
 	active := detectActiveSessions(sessions)
 	if len(active) != 2 {

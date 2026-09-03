@@ -1,8 +1,8 @@
 class Recall < Formula
   desc "Find, bookmark, and reopen local Codex and Claude conversations"
   homepage "https://github.com/jborlum/recall"
-  url "https://github.com/jborlum/recall/archive/refs/tags/v0.9.2.tar.gz"
-  sha256 "56402f85d7ba00ac21c8afe03762580bfa669cc1db74656be28774e1cd7614c2"
+  url "https://github.com/jborlum/recall/archive/refs/tags/v0.10.0.tar.gz"
+  sha256 "edd8216172571d27a757597cca3421bb73e0cac46c13f2041ce56dd6eb57fba1"
   head "https://github.com/jborlum/recall.git", branch: "main"
 
   depends_on "go" => :build

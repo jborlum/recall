@@ -54,6 +54,7 @@ type options struct {
 	cwd      string
 	limit    int
 	print    bool
+	preview  string
 }
 
 func main() {
@@ -68,6 +69,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	flags.StringVar(&opts.cwd, "cwd", "", "only show sessions under this directory")
 	flags.IntVar(&opts.limit, "limit", 50, "maximum displayed results")
 	flags.BoolVar(&opts.print, "print", false, "print matching sessions and exit")
+	flags.StringVar(&opts.preview, "preview", "", "print one transcript, highlighting the query")
 	showVersion := flags.Bool("version", false, "print version")
 	flags.Usage = func() { usage(errOut) }
 	if err := flags.Parse(args); err != nil {
@@ -84,6 +86,11 @@ func run(args []string, in io.Reader, out, errOut io.Writer) int {
 	if opts.provider != "" && opts.provider != "codex" && opts.provider != "claude" {
 		fmt.Fprintln(errOut, "recall: --provider must be codex or claude")
 		return 2
+	}
+	// The picker's preview panel re-runs recall this way, so it is handled before
+	// anything discovers or reads bookmarks: one transcript is all it needs.
+	if opts.preview != "" {
+		return previewTranscript(opts.preview, strings.Join(flags.Args(), " "), out, errOut)
 	}
 
 	rest := flags.Args()
@@ -240,9 +247,11 @@ Flags:
   --cwd DIR                         only show sessions under DIR
   --limit N                         maximum results (default 50)
   --print                           print results instead of opening one
+  --preview PATH [QUERY]            print one transcript, marking the query
   --version                         print the version
 
-In the picker: Enter resumes, Ctrl-F forks, Esc closes.
+In the picker: Enter resumes, Ctrl-F forks, Ctrl-P toggles the preview,
+Esc closes. The panel shows the lines matching your search.
 `)
 }
 
@@ -991,20 +1000,22 @@ func pickerWidth() int {
 }
 
 // pickerLine builds one fzf input line. Field 1 carries the row index so the
-// selection can be mapped back to a session; field 2 holds the visible row
-// followed by the searchable transcript text, padded out past the terminal width
-// so fzf truncates the transcript out of view.
+// selection can be mapped back to a session, field 2 holds the visible row
+// followed by the searchable transcript text, and field 3 is the transcript path
+// for the preview panel. Only field 2 is displayed, but fzf's {3} placeholder
+// still reads the original field, so the path costs nothing on screen.
 //
 // fzf cannot display one field while searching another: --with-nth rewrites the
 // line before --nth is applied, so searchable text has to live inside the
-// displayed field. An earlier version relied on the ANSI conceal attribute
-// instead, which fzf consumes without emitting, leaving the transcript on screen.
-func pickerLine(index int, row, searchText string, width int) string {
+// displayed field, padded past the terminal width to keep it off screen. That
+// alone is not enough, because fzf scrolls a row sideways to reveal a match and
+// so dragged the transcript into view; --no-hscroll holds every row at its start.
+func pickerLine(index int, row, searchText, path string, width int) string {
 	padding := width - len([]rune(row))
 	if padding < 1 {
 		padding = 1
 	}
-	return fmt.Sprintf("%d\t%s%s%s\n", index, row, strings.Repeat(" ", padding), searchText)
+	return fmt.Sprintf("%d\t%s%s%s\t%s\n", index, row, strings.Repeat(" ", padding), searchText, path)
 }
 
 // pickerText is the text fzf searches. Fields collapses every run of whitespace,
@@ -1031,6 +1042,12 @@ func oneLine(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit-1]) + "…"
+}
+
+// shellQuote wraps a value for a shell command line. Both the picker's preview
+// command and the generated macOS hotkeys embed a path this way.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func shortHome(path string) string {
@@ -1077,7 +1094,7 @@ func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt 
 	var input strings.Builder
 	width := pickerWidth()
 	for index, item := range candidates {
-		input.WriteString(pickerLine(index, render(item), pickerText(item), width))
+		input.WriteString(pickerLine(index, render(item), pickerText(item), item.Path, width))
 	}
 	var selected bytes.Buffer
 	// --with-nth=2 displays only the second field. --nth must not be set alongside
@@ -1086,8 +1103,10 @@ func pick(sessions []session, opts options, allowFork, allowDelete bool, prompt 
 	// Every row is padded past the terminal width on purpose, so fzf's truncation
 	// marker would show on all of them and mean nothing.
 	arguments := []string{
-		"--ansi", "--delimiter=\\t", "--with-nth=2", "--ellipsis=",
+		"--ansi", "--delimiter=\\t", "--with-nth=2", "--ellipsis=", "--no-hscroll",
 		"--prompt=" + prompt, "--height=80%", "--reverse",
+		"--preview=" + previewCommand(), "--preview-window=down,55%,wrap,border-top",
+		"--bind=ctrl-p:toggle-preview",
 	}
 	if allowDelete {
 		arguments = append(arguments, "--expect=enter,ctrl-f,ctrl-d", "--header=Enter: resume   Ctrl-F: fork   Ctrl-D: delete   Esc: close")

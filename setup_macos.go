@@ -330,10 +330,6 @@ func hammerspoonConflict(contents string) string {
 	return ""
 }
 
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
-
 func reloadHammerspoon() bool {
 	if os.Getenv("RECALL_SETUP_NO_RELOAD") != "" {
 		return true

@@ -473,7 +473,7 @@ func TestDiscoveredSessionsAlwaysHaveADate(t *testing.T) {
 // transcript text must be hidden by padding it past the terminal width instead.
 func TestPickerLineHidesSearchTextWithoutAnsi(t *testing.T) {
 	row := "* claude 2026-09-03  recall-dev  Testing recall  ~/recall"
-	line := pickerLine(0, row, "provider id transcript words", 120)
+	line := pickerLine(0, row, "provider id transcript words", "/tmp/t.jsonl", 120)
 	if strings.Contains(line, "\x1b") {
 		t.Fatalf("picker line must not rely on ANSI escapes: %q", line)
 	}
@@ -495,7 +495,7 @@ func TestPickerLineHidesSearchTextWithoutAnsi(t *testing.T) {
 
 func TestPickerLineAlwaysSeparatesRowFromSearchText(t *testing.T) {
 	// A row longer than the width must still not run into the search text.
-	line := pickerLine(7, strings.Repeat("x", 200), "SEARCHABLE", 40)
+	line := pickerLine(7, strings.Repeat("x", 200), "SEARCHABLE", "/tmp/t.jsonl", 40)
 	rest := strings.SplitN(strings.TrimSuffix(line, "\n"), "\t", 2)[1]
 	if !strings.Contains(rest, " SEARCHABLE") {
 		t.Fatalf("row and search text were joined without a separator: %q", rest)

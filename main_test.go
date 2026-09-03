@@ -467,3 +467,16 @@ func TestPickerTextStripsControlCharacters(t *testing.T) {
 		}
 	}
 }
+
+// The setup command is compiled per platform, so the name needs no platform
+// suffix. It must still be recognised as a command rather than a search term.
+func TestSetupIsACommand(t *testing.T) {
+	if !isCommand("setup") {
+		t.Fatal("setup should be dispatched as a command")
+	}
+	for _, value := range []string{"setup-macos", "setup-omarchy"} {
+		if isCommand(value) {
+			t.Errorf("%q should no longer be a command", value)
+		}
+	}
+}

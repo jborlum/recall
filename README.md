@@ -87,7 +87,7 @@ For global hotkeys, install Hammerspoon and then configure recall:
 
 ```sh
 brew install --cask hammerspoon
-recall setup-macos
+recall setup
 ```
 
 Grant Hammerspoon the requested Accessibility and Terminal automation
@@ -117,7 +117,7 @@ page](https://github.com/junegunn/fzf/releases) and place it on your `PATH`.
 For global hotkeys without Homebrew, download the Hammerspoon release zip from
 [its releases page](https://github.com/Hammerspoon/Hammerspoon/releases),
 unzip it into `/Applications`, launch it once to grant Accessibility
-permission, then run `recall setup-macos`.
+permission, then run `recall setup`.
 
 ## Usage
 
@@ -153,7 +153,7 @@ it first asks which one to bookmark.
 For Omarchy/Hyprland, install the global hotkeys with:
 
 ```sh
-recall setup-omarchy
+recall setup
 ```
 
 This installs `SUPER+ALT+B` for bookmarking the active session,
@@ -165,11 +165,11 @@ adds only missing bindings, and reloads and validates Hyprland. It is safe to
 run more than once. Inspect or remove the integration with:
 
 ```sh
-recall setup-omarchy status
-recall setup-omarchy remove
+recall setup status
+recall setup remove
 ```
 
-On macOS, `recall setup-macos` manages equivalent Hammerspoon bindings:
+On macOS, `recall setup` manages equivalent Hammerspoon bindings:
 
 - `COMMAND+OPTION+B` bookmarks the active session.
 - `COMMAND+OPTION+R` opens the bookmark manager.
@@ -178,25 +178,24 @@ On macOS, `recall setup-macos` manages equivalent Hammerspoon bindings:
 Manage the bindings with:
 
 ```sh
-recall setup-macos status
-recall setup-macos remove
+recall setup status
+recall setup remove
 ```
 
 ### Choosing the terminal
 
-`recall setup-macos` opens the commands in the terminal it was run from,
-detected through `TERM_PROGRAM`. Pick one explicitly with `--terminal`:
+`recall setup` opens the commands in the terminal it was run from, detected
+through `TERM_PROGRAM`. Pick one explicitly with `--terminal`:
 
 ```sh
-recall setup-macos --terminal ghostty
+recall setup --terminal ghostty
 ```
 
 The supported names are `terminal` (Terminal.app), `ghostty`, and `iterm`
 (iTerm2). Terminal.app is used when the current terminal is not recognised.
-Re-running `setup-macos` with a different `--terminal` rewrites the managed
-block in place, and `recall setup-macos status` reports which terminal is
-configured. `RECALL_TERMINAL` sets the default if you would rather not pass the
-flag.
+Re-running `setup` with a different `--terminal` rewrites the managed block in
+place, and `recall setup status` reports which terminal is configured.
+`RECALL_TERMINAL` sets the default if you would rather not pass the flag.
 
 Terminal.app and iTerm2 are driven with AppleScript. Ghostty refuses to launch
 its emulator from its own CLI on macOS, so its bindings go through
@@ -205,7 +204,7 @@ its emulator from its own CLI on macOS, so its bindings go through
 To add another terminal, add an entry to `macTerminals` in `setup_macos.go`
 returning the Lua that opens a window running the given shell command.
 
-If `recall setup-macos` reports that it could not reload Hammerspoon, reload the
+If `recall setup` reports that it could not reload Hammerspoon, reload the
 config from the Hammerspoon menu. The bundled `hs` command only works when
 `init.lua` loads the IPC module, which is not enabled by default:
 

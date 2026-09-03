@@ -22,7 +22,7 @@ const (
 	// macTerminalMarker records the chosen terminal inside the managed block so
 	// that status can report it and install can switch terminals in place.
 	macTerminalMarker = "-- recall terminal: "
-	macSetupUsage     = "usage: recall setup-macos [--terminal NAME] [status|remove]"
+	macSetupUsage     = "usage: recall setup [--terminal NAME] [status|remove]"
 )
 
 // macTerminals maps the names accepted by --terminal to the Lua that opens a new
@@ -54,14 +54,14 @@ func loginShell() string {
 	return "/bin/sh"
 }
 
-func isPlatformSetupCommand(value string) bool { return value == "setup-macos" }
+func isPlatformSetupCommand(value string) bool { return value == "setup" }
 
 func runPlatformSetup(args []string, out, errOut io.Writer) int {
 	return runSetupMacOS(args, out, errOut)
 }
 
 func platformSetupUsage() string {
-	return "  recall setup-macos [--terminal NAME] [status|remove]\n                                    manage macOS global hotkeys\n"
+	return "  recall setup [--terminal NAME] [status|remove]\n                                    manage macOS global hotkeys\n"
 }
 
 func runSetupMacOS(args []string, out, errOut io.Writer) int {

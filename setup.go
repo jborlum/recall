@@ -21,14 +21,14 @@ const (
 	searchKey   = "SUPER + ALT + L"
 )
 
-func isPlatformSetupCommand(value string) bool { return value == "setup-omarchy" }
+func isPlatformSetupCommand(value string) bool { return value == "setup" }
 
 func runPlatformSetup(args []string, out, errOut io.Writer) int {
 	return runSetupOmarchy(args, out, errOut)
 }
 
 func platformSetupUsage() string {
-	return "  recall setup-omarchy [status|remove]\n                                    manage Omarchy global hotkeys\n"
+	return "  recall setup [status|remove]      manage Omarchy global hotkeys\n"
 }
 
 type bindingState struct {
@@ -41,7 +41,7 @@ type bindingState struct {
 
 func runSetupOmarchy(args []string, out, errOut io.Writer) int {
 	if len(args) > 1 {
-		fmt.Fprintln(errOut, "usage: recall setup-omarchy [status|remove]")
+		fmt.Fprintln(errOut, "usage: recall setup [status|remove]")
 		return 2
 	}
 	path, err := omarchyBindingsPath()
@@ -61,7 +61,7 @@ func runSetupOmarchy(args []string, out, errOut io.Writer) int {
 	case "remove":
 		return removeOmarchySetup(path, out, errOut)
 	default:
-		fmt.Fprintln(errOut, "usage: recall setup-omarchy [status|remove]")
+		fmt.Fprintln(errOut, "usage: recall setup [status|remove]")
 		return 2
 	}
 }

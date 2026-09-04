@@ -144,7 +144,7 @@ git push -q origin main "$tag"
 
 echo "==> Creating the release"
 # The tag push starts CI, which creates the release if it beats us to it.
-if ! gh release create "$tag" --title "$tag" --notes-file "$notes" 2>/dev/null; then
+if ! gh release create "$tag" --title "$tag" --notes-file "$notes" >/dev/null 2>&1; then
 	gh release edit "$tag" --notes-file "$notes" >/dev/null
 fi
 gh release view "$tag" --json url --jq .url

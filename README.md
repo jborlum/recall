@@ -26,6 +26,28 @@ makepkg -si
 Pacman then owns `/usr/bin/recall` and pulls in `fzf`. Note that `makepkg`
 builds the release tag named in `PKGBUILD`, not your working tree.
 
+### Linux, from a release binary
+
+For a remote box or a devbox with no Go toolchain and no package manager of its
+own:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jborlum/recall/main/install.sh | sh
+```
+
+The script resolves the latest release, verifies its `SHA256SUMS` entry, and
+lands a static `linux/amd64` binary in `~/.local/bin/recall`. Re-run it to
+update; it exits early when that release is already installed, and `-f`
+reinstalls anyway. `PREFIX` chooses another directory and `RECALL_VERSION` picks
+a specific tag:
+
+```sh
+curl -fsSL .../install.sh | RECALL_VERSION=v0.11.0 PREFIX=/usr/local/bin sh
+```
+
+`fzf` still has to come from the box's own package manager, or from
+[the `fzf` releases page](https://github.com/junegunn/fzf/releases).
+
 ### macOS
 
 This repository doubles as its own Homebrew tap, so no clone is needed:
@@ -180,3 +202,12 @@ go test ./...
 go vet ./...
 gofmt -l .
 ```
+
+### Releasing
+
+Bump `version` in `main.go`, `pkgver` in `PKGBUILD`, and the formula's `url` and
+`sha256`, then push a `v*` tag. The `release` workflow runs the tests, builds
+`linux/amd64` with the tag's version stamped in, and attaches the binary and a
+`SHA256SUMS` file to the release, creating the release first if the tag arrived
+before it. That is what `install.sh` downloads, so a release without those
+assets cannot be installed on Linux.

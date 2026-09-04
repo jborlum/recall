@@ -18,7 +18,7 @@ import (
 	"unicode"
 )
 
-var version = "0.12.0"
+var version = "0.13.0"
 
 type session struct {
 	Provider   string

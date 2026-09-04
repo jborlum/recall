@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: Build linux/amd64
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="recall_${GITHUB_REF_NAME}_linux_amd64"
+          go build -trimpath -ldflags="-s -w -X main.version=$version" -o "$name" .
+          sha256sum "$name" > SHA256SUMS
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The tag may be pushed before the release exists, or after it was
+          # created by hand with notes worth keeping.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" \
+            "recall_${GITHUB_REF_NAME}_linux_amd64" SHA256SUMS --clobber

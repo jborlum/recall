@@ -247,7 +247,7 @@ func appendManagedBindings(data []byte, binary string, state bindingState) []byt
 
 func omarchyBinding(key, description, command string) string {
 	return fmt.Sprintf("o.bind(\n  %q,\n  %q,\n  %q\n)\n\n", key, description,
-		"setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title=Recall -e env RECALL_NOTIFY=1 "+command)
+		"setsid uwsm-app -- xdg-terminal-exec --app-id=org.omarchy.terminal --title=Recall -e "+hotkeyEnvPrefix()+" "+command)
 }
 
 type bindingCall struct {

@@ -309,7 +309,7 @@ func readOptionalConfig(path string) ([]byte, os.FileMode, bool, error) {
 func appendMacOSBindings(data []byte, binary, terminal string) []byte {
 	launch := macTerminals[terminal]
 	command := func(arguments string) string {
-		shell := "env RECALL_NOTIFY=1 " + shellQuote(binary)
+		shell := hotkeyEnvPrefix() + " " + shellQuote(binary)
 		if arguments != "" {
 			shell += " " + arguments
 		}

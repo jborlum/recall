@@ -233,6 +233,26 @@ func TestGhosttySnippetPrefersRunningInstance(t *testing.T) {
 	}
 }
 
+// Both Ghostty paths run the real command, so both have to clear the inherited
+// session. Asserted as an invariant rather than a count: nothing may set
+// RECALL_NOTIFY without also dropping the parent's child-session marker.
+func TestBindingsAlwaysClearInheritedSession(t *testing.T) {
+	t.Setenv("SHELL", "/bin/zsh")
+	for _, terminal := range macTerminalNames() {
+		configured := string(appendMacOSBindings(nil, "/opt/homebrew/bin/recall", terminal))
+		announced := strings.Count(configured, "RECALL_NOTIFY=1")
+		cleared := strings.Count(configured, "-u CLAUDE_CODE_CHILD_SESSION")
+		if announced == 0 {
+			t.Errorf("%s: no command announces the launch:\n%s", terminal, configured)
+			continue
+		}
+		if announced != cleared {
+			t.Errorf("%s: %d commands set RECALL_NOTIFY but only %d clear the child-session marker:\n%s",
+				terminal, announced, cleared, configured)
+		}
+	}
+}
+
 // Addressing a Ghostty that is not running would launch it and let it open its
 // own initial window on top of the scripted one, so the script has to check
 // first and hand the cold start to open(1).

@@ -206,7 +206,7 @@ gofmt -l .
 ### Releasing
 
 ```sh
-mise run release 0.14.0
+scripts/release.sh 0.14.0        # or: mise run release 0.14.0
 ```
 
 The version is pinned in four places because three packaging channels each

@@ -3,9 +3,11 @@
 # the GitHub release. CI then attaches the binaries and points the formula at
 # the new tarball, so nothing is left to edit by hand.
 #
-#   mise run release 0.14.0
-#   mise run release 0.14.0 --dry-run
-#   mise run release 0.14.0 -n notes.md
+#   scripts/release.sh 0.14.0
+#   scripts/release.sh 0.14.0 --dry-run
+#   scripts/release.sh 0.14.0 -n notes.md
+#
+# Also available as `mise run release` where mise is set up.
 
 set -eu
 

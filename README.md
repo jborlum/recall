@@ -19,9 +19,6 @@ brew tap jborlum/recall https://github.com/jborlum/recall.git
 brew install jborlum/recall/recall
 ```
 
-Install by full name; Homebrew rejects a formula given by path. `--HEAD` builds
-`main` instead of the latest release, and `brew upgrade --fetch-HEAD` updates it.
-
 ### Linux
 
 A static binary, for machines with no Go toolchain:

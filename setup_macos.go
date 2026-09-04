@@ -35,9 +35,25 @@ var macTerminals = map[string]func(shell string) string{
 		return luaAppleScript("tell application \"iTerm\"\nactivate\ncreate window with default profile command " + appleScriptQuote(shell) + "\nend tell")
 	},
 	"ghostty": func(shell string) string {
-		// Ghostty refuses to launch the emulator from its own CLI on macOS, so the
-		// window is opened through open(1) instead of AppleScript.
-		return luaOpenApplication("Ghostty.app", "-e", loginShell(), "-l", "-i", "-c", shell)
+		// Ghostty refuses to launch the emulator from its own CLI on macOS, but
+		// 1.3 gained a scripting dictionary, and asking the running instance for a
+		// window is far cheaper than open(1): `open -na` starts a second Ghostty
+		// app instance per press, which measures ~0.3s with one already warm and
+		// worse with none. Creating the window over AppleScript takes ~0.2s.
+		//
+		// The script raises rather than falling through when Ghostty is not
+		// running, because addressing a dead app would launch it *and* let it open
+		// its own initial window — two windows for one hotkey. Ghostty versions
+		// predating the dictionary raise as well, so both land on the open(1)
+		// fallback below, which stays the cold-start path.
+		command := loginShell() + " -l -i -c " + shellQuote(shell)
+		script := "if application \"Ghostty\" is running then\n" +
+			"tell application \"Ghostty\" to new window with configuration {command:" + appleScriptQuote(command) + "}\n" +
+			"else\n" +
+			"error \"Ghostty is not running\"\n" +
+			"end if"
+		fallback := luaOpenApplication("Ghostty.app", "-e", loginShell(), "-l", "-i", "-c", shell)
+		return "if not " + luaAppleScript(script) + " then " + fallback + " end"
 	},
 }
 

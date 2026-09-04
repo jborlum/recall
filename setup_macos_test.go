@@ -220,28 +220,44 @@ func TestHammerspoonSnippetQuotesExecutablePath(t *testing.T) {
 	}
 }
 
-// Ghostty cannot be handed a command over AppleScript, so its bindings must go
-// through open(1) instead.
-func TestGhosttySnippetUsesOpen(t *testing.T) {
+// Ghostty asks the running instance for a window over AppleScript, which is
+// cheaper than the second app instance open(1) starts, and keeps open(1) as the
+// fallback for a cold or pre-1.3 Ghostty.
+func TestGhosttySnippetPrefersRunningInstance(t *testing.T) {
 	t.Setenv("SHELL", "/bin/zsh")
 	configured := string(appendMacOSBindings(nil, "/opt/homebrew/bin/recall", "ghostty"))
-	for _, want := range []string{"/usr/bin/open", "-na", "Ghostty.app", "--args", "-e", "/bin/zsh"} {
+	for _, want := range []string{"hs.osascript.applescript", "new window with configuration", "/usr/bin/open", "-na", "Ghostty.app", "--args", "-e", "/bin/zsh"} {
 		if !strings.Contains(configured, want) {
 			t.Fatalf("missing %q in ghostty bindings:\n%s", want, configured)
 		}
 	}
-	if strings.Contains(configured, "osascript") {
-		t.Fatalf("ghostty bindings should not use AppleScript:\n%s", configured)
+}
+
+// Addressing a Ghostty that is not running would launch it and let it open its
+// own initial window on top of the scripted one, so the script has to check
+// first and hand the cold start to open(1).
+func TestGhosttySnippetGuardsAgainstColdGhostty(t *testing.T) {
+	t.Setenv("SHELL", "/bin/zsh")
+	configured := string(appendMacOSBindings(nil, "/opt/homebrew/bin/recall", "ghostty"))
+	if !strings.Contains(configured, `is running then`) {
+		t.Fatalf("ghostty bindings do not check whether Ghostty is running:\n%s", configured)
+	}
+	if !strings.Contains(configured, `if not hs.osascript.applescript(`) {
+		t.Fatalf("ghostty bindings do not fall back when the script fails:\n%s", configured)
 	}
 }
 
-// open(1) does not start a login shell, so without -l -i the PATH entries that
-// locate fzf and the provider CLIs are missing and resuming a session fails.
+// Neither open(1) nor a scripted Ghostty window starts a login shell, so
+// without -l -i the PATH entries that locate fzf and the provider CLIs are
+// missing and resuming a session fails. Both paths have to name one.
 func TestGhosttySnippetUsesInteractiveLoginShell(t *testing.T) {
 	t.Setenv("SHELL", "/bin/zsh")
 	configured := string(appendMacOSBindings(nil, "/opt/homebrew/bin/recall", "ghostty"))
 	if !strings.Contains(configured, `"/bin/zsh", "-l", "-i", "-c"`) {
-		t.Fatalf("ghostty bindings do not use an interactive login shell:\n%s", configured)
+		t.Fatalf("ghostty open(1) fallback does not use an interactive login shell:\n%s", configured)
+	}
+	if !strings.Contains(configured, `/bin/zsh -l -i -c `) {
+		t.Fatalf("ghostty scripted window does not use an interactive login shell:\n%s", configured)
 	}
 }
 

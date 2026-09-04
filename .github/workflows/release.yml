@@ -15,6 +15,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Check the pinned versions match the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -q "^var version = \"$version\"$" main.go ||
+            { echo "main.go is not at $version"; exit 1; }
+          grep -q "^pkgver=$version$" PKGBUILD ||
+            { echo "PKGBUILD is not at $version"; exit 1; }
       - run: go test ./...
       - name: Build linux/amd64
         env:
@@ -36,3 +43,23 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
           gh release upload "$GITHUB_REF_NAME" \
             "recall_${GITHUB_REF_NAME}_linux_amd64" SHA256SUMS --clobber
+
+  packaging:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Point the formula at the new tarball
+        run: scripts/sync-packaging.sh "$GITHUB_REF_NAME" --formula
+      - name: Commit the bump
+        run: |
+          if git diff --quiet; then
+            echo "Packaging metadata is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "Point the formula at $GITHUB_REF_NAME"
+          git push -q origin HEAD:main

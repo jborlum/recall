@@ -1,2 +1,6 @@
 [tools]
 go = "1.27"
+
+[tasks.release]
+description = "Cut a release: bump the pinned versions, tag, push, and open the GitHub release"
+run = "scripts/release.sh"

@@ -205,9 +205,27 @@ gofmt -l .
 
 ### Releasing
 
-Bump `version` in `main.go`, `pkgver` in `PKGBUILD`, and the formula's `url` and
-`sha256`, then push a `v*` tag. The `release` workflow runs the tests, builds
-`linux/amd64` with the tag's version stamped in, and attaches the binary and a
-`SHA256SUMS` file to the release, creating the release first if the tag arrived
-before it. That is what `install.sh` downloads, so a release without those
-assets cannot be installed on Linux.
+```sh
+mise run release 0.14.0
+```
+
+The version is pinned in four places because three packaging channels each
+restate the git tag in their own format, so the script owns all of them. It
+refuses to run on a dirty tree, a branch other than `main`, a `main` that has
+diverged from the remote, or a tag that already exists; runs the tests; bumps
+`main.go` and `PKGBUILD`; derives `.SRCINFO` from `PKGBUILD`; opens an editor
+prefilled with the commits since the last tag for the release notes; then
+commits, tags, pushes, and creates the release. Add `--dry-run` to see all of
+that without touching anything, or `-n FILE` to take the notes from a file.
+
+CI finishes the job. The `release` workflow refuses to build a tag whose pinned
+versions disagree with it, then builds `linux/amd64` with the version stamped in
+and attaches the binary and `SHA256SUMS` to the release — the assets `install.sh`
+downloads, without which a release cannot be installed on Linux. A second job
+computes the source tarball's checksum, repoints `Formula/recall.rb`, and commits
+that to `main`, so the formula's `sha256` is never wrong and never typed by hand.
+Run `git pull` afterwards to pick it up.
+
+`scripts/sync-packaging.sh` holds the `.SRCINFO` and formula rewrites for both
+callers. Both of its passes are idempotent, so running it against an
+already-released tag is a safe no-op.
